@@ -162,12 +162,19 @@ impl Storage for FsStorage {
             let bucket_json = dir.join(".bucket.json");
             match tokio::fs::read(&bucket_json).await {
                 Ok(bytes) => {
-                    if let Ok(info) = serde_json::from_slice::<BucketInfo>(&bytes) {
-                        buckets.push(info);
-                    }
+                    // A present-but-unparseable .bucket.json is corruption, not "not a
+                    // bucket" (WR-05). Surface it instead of silently dropping the bucket,
+                    // which would hide it from the API while delete/put still operate on it.
+                    let info = serde_json::from_slice::<BucketInfo>(&bytes).map_err(|e| {
+                        StorageError::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("corrupt .bucket.json at {}: {e}", bucket_json.display()),
+                        ))
+                    })?;
+                    buckets.push(info);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // Not a ferrobucket bucket directory — skip silently.
+                    // No .bucket.json — not a ferrobucket bucket directory; skip silently.
                 }
                 Err(e) => return Err(StorageError::Io(e)),
             }
@@ -511,6 +518,22 @@ mod tests {
         match storage.create_bucket("buk").await {
             Err(StorageError::BucketAlreadyExists(_)) => {}
             other => panic!("expected BucketAlreadyExists, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_buckets_surfaces_corrupt_metadata() {
+        // WR-05 regression: a present-but-corrupt .bucket.json must surface an error,
+        // not silently hide the bucket from list_buckets.
+        let dir = tempdir().unwrap();
+        let storage = FsStorage::new(dir.path());
+        storage.create_bucket("good-bucket").await.unwrap();
+        // Corrupt the metadata.
+        std::fs::write(dir.path().join("good-bucket/.bucket.json"), b"{not valid json").unwrap();
+
+        match storage.list_buckets().await {
+            Err(StorageError::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData => {}
+            other => panic!("expected InvalidData for corrupt .bucket.json, got {:?}", other),
         }
     }
 
