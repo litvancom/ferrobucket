@@ -12,7 +12,13 @@ pub const KEY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .add(b'~');
 
 /// Percent-encode an S3 object key into a single flat filesystem filename.
-/// Returns `StorageError::KeyTooLong` if the encoded form exceeds 255 bytes (D-02).
+/// Returns `StorageError::KeyTooLong` if the encoded form exceeds 255 bytes (D-02),
+/// or `StorageError::InvalidKey` for traversal-unsafe keys.
+///
+/// The traversal guard must be symmetric with `decode_key` (CR-03): dots are in the
+/// safe set, so a key like ".." encodes to "..", and `object_path` would resolve to the
+/// objects-dir parent. Rejecting the same set here that `decode_key` rejects keeps the
+/// write path from creating filenames the read path would refuse.
 pub fn encode_key(key: &str) -> Result<String, StorageError> {
     let encoded = utf8_percent_encode(key, KEY_ENCODE_SET).to_string();
     if encoded.len() > 255 {
@@ -20,7 +26,16 @@ pub fn encode_key(key: &str) -> Result<String, StorageError> {
             key: key.to_owned(),
         });
     }
+    if is_traversal_unsafe(key) {
+        return Err(StorageError::InvalidKey);
+    }
     Ok(encoded)
+}
+
+/// Reject keys that decode to a path-traversal sequence or contain a NUL byte.
+/// Shared by `encode_key` and `decode_key` so the write and read paths agree (CR-03).
+fn is_traversal_unsafe(s: &str) -> bool {
+    s.contains('\0') || s == ".." || s.starts_with("../") || s.contains("/../") || s.ends_with("/..")
 }
 
 /// Decode a percent-encoded filename back to an S3 object key.
@@ -33,11 +48,7 @@ pub fn decode_key(encoded: &str) -> Result<String, StorageError> {
         .map_err(|_| StorageError::InvalidKey)?;
 
     // Traversal safety: reject sequences that could escape the data root.
-    if decoded.contains('\0')
-        || decoded == ".."
-        || decoded.starts_with("../")
-        || decoded.contains("/../")
-    {
+    if is_traversal_unsafe(&decoded) {
         return Err(StorageError::InvalidKey);
     }
 
@@ -73,6 +84,10 @@ mod tests {
                 Err(StorageError::KeyTooLong { .. }) => {
                     // Acceptable: key encodes to > 255 bytes; skip this case.
                 }
+                Err(StorageError::InvalidKey) => {
+                    // Acceptable: key is a traversal sequence (e.g. "..") that encode_key
+                    // now rejects symmetrically with decode_key (CR-03); skip this case.
+                }
                 Err(e) => {
                     panic!("unexpected encode error: {:?}", e);
                 }
@@ -106,6 +121,20 @@ mod tests {
             Err(StorageError::KeyTooLong { .. }) => {} // expected
             other => panic!("expected KeyTooLong, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn encode_rejects_traversal_keys() {
+        // CR-03: encode_key must reject the same traversal sequences decode_key does,
+        // so the write path can never create filenames that escape objects/.
+        assert!(matches!(encode_key(".."), Err(StorageError::InvalidKey)));
+        assert!(matches!(encode_key("../secret"), Err(StorageError::InvalidKey)));
+        assert!(matches!(encode_key("a/../b"), Err(StorageError::InvalidKey)));
+        assert!(matches!(encode_key("a/.."), Err(StorageError::InvalidKey)));
+        assert!(matches!(encode_key("a\0b"), Err(StorageError::InvalidKey)));
+        // A single dot is a valid, non-traversal key and must still encode.
+        assert!(encode_key(".").is_ok());
+        assert!(encode_key("a..b").is_ok());
     }
 
     #[test]

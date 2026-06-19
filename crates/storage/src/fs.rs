@@ -240,6 +240,9 @@ impl Storage for FsStorage {
         body: impl Stream<Item = std::io::Result<Bytes>> + Send,
         content_type: Option<String>,
     ) -> Result<ObjectMeta, StorageError> {
+        // Reject traversal-unsafe bucket names BEFORE any path arithmetic (CR-03):
+        // an unvalidated `bucket` like "../x" or "/etc" escapes data_root via Path::join.
+        validate_bucket_name(bucket)?;
         // Validate bucket exists.
         if !self.bucket_path(bucket).exists() {
             return Err(StorageError::NoSuchBucket(bucket.to_owned()));
@@ -275,6 +278,7 @@ impl Storage for FsStorage {
         ),
         StorageError,
     > {
+        validate_bucket_name(bucket)?;
         let encoded_key = encode_key(key)?;
         // Read sidecar first — a missing sidecar means NoSuchKey.
         let meta = read_sidecar(&self.meta_path(bucket, &encoded_key)).await?;
@@ -283,12 +287,14 @@ impl Storage for FsStorage {
     }
 
     async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectMeta, StorageError> {
+        validate_bucket_name(bucket)?;
         let encoded_key = encode_key(key)?;
         // head reads the sidecar only — no body I/O needed (Open Question 1).
         read_sidecar(&self.meta_path(bucket, &encoded_key)).await
     }
 
     async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         let encoded_key = encode_key(key)?;
         let obj_path = self.object_path(bucket, &encoded_key);
         let meta_path = self.meta_path(bucket, &encoded_key);
@@ -316,6 +322,7 @@ impl Storage for FsStorage {
         bucket: &str,
         req: ListV2Req,
     ) -> Result<ListV2Res, StorageError> {
+        validate_bucket_name(bucket)?;
         // Validate bucket exists.
         if !self.bucket_path(bucket).exists() {
             return Err(StorageError::NoSuchBucket(bucket.to_owned()));
@@ -572,6 +579,49 @@ mod tests {
             .collect();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].file_name().to_string_lossy().as_ref(), encoded);
+    }
+
+    #[tokio::test]
+    async fn object_ops_reject_traversal_bucket_names() {
+        // CR-03: object operations must validate the bucket name before any path
+        // arithmetic, so a traversal/absolute bucket cannot escape data_root.
+        let (_dir, storage) = make_storage_with_bucket().await;
+        for bad in &["../other", "/etc", ".."] {
+            match storage
+                .put_object(bad, "k", body_from(b"x"), None)
+                .await
+            {
+                Err(StorageError::InvalidBucketName(_)) => {}
+                other => panic!("put_object({:?}) expected InvalidBucketName, got {:?}", bad, other),
+            }
+            match storage.get_object(bad, "k").await {
+                Err(StorageError::InvalidBucketName(_)) => {}
+                Err(e) => panic!("get_object({:?}) expected InvalidBucketName, got {:?}", bad, e),
+                Ok(_) => panic!("get_object({:?}) expected InvalidBucketName, got Ok", bad),
+            }
+            match storage.head_object(bad, "k").await {
+                Err(StorageError::InvalidBucketName(_)) => {}
+                other => panic!("head_object({:?}) expected InvalidBucketName, got {:?}", bad, other),
+            }
+            match storage.delete_object(bad, "k").await {
+                Err(StorageError::InvalidBucketName(_)) => {}
+                other => panic!("delete_object({:?}) expected InvalidBucketName, got {:?}", bad, other),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn put_object_rejects_traversal_key() {
+        // CR-03: a key like ".." must be rejected on the write path (encode_key guard),
+        // never written to the objects-dir parent.
+        let (_dir, storage) = make_storage_with_bucket().await;
+        match storage
+            .put_object("test-bucket", "..", body_from(b"x"), None)
+            .await
+        {
+            Err(StorageError::InvalidKey) => {}
+            other => panic!("expected InvalidKey for key '..', got {:?}", other),
+        }
     }
 
     #[tokio::test]
