@@ -18,19 +18,34 @@ pub struct BucketInfo {
     pub created_at: OffsetDateTime,
 }
 
-/// Stub — returns Err so RED tests fail on missing implementation.
+/// Write ObjectMeta as a JSON sidecar file (REQ-object-persistence).
+/// Caller must ensure this is written AFTER the object body rename (D-04 crash-safe ordering).
 pub async fn write_sidecar(
-    _path: &std::path::Path,
-    _meta: &ObjectMeta,
+    path: &std::path::Path,
+    meta: &ObjectMeta,
 ) -> Result<(), crate::StorageError> {
-    Err(crate::StorageError::InvalidKey)
+    let json = serde_json::to_string(meta).map_err(|e| {
+        crate::StorageError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    })?;
+    tokio::fs::write(path, json.as_bytes())
+        .await
+        .map_err(crate::StorageError::Io)
 }
 
-/// Stub — returns Err so RED tests fail on missing implementation.
+/// Read ObjectMeta from a JSON sidecar file.
+/// A missing sidecar is treated as NoSuchKey (RESEARCH.md Open Question 3).
 pub async fn read_sidecar(
-    _path: &std::path::Path,
+    path: &std::path::Path,
 ) -> Result<ObjectMeta, crate::StorageError> {
-    Err(crate::StorageError::InvalidKey)
+    let bytes = tokio::fs::read(path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            crate::StorageError::NoSuchKey(path.display().to_string())
+        } else {
+            crate::StorageError::Io(e)
+        }
+    })?;
+    serde_json::from_slice(&bytes)
+        .map_err(|e| crate::StorageError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
 }
 
 #[cfg(test)]
@@ -62,7 +77,7 @@ mod tests {
         assert_eq!(loaded.size, meta.size);
         assert_eq!(loaded.content_type, meta.content_type);
         assert_eq!(loaded.etag, meta.etag);
-        // RFC3339 round-trip: compare as formatted strings (subsecond precision may vary)
+        // RFC3339 round-trip: compare unix timestamps (subsecond may differ by RFC3339 rounding)
         assert_eq!(
             loaded.last_modified.unix_timestamp(),
             meta.last_modified.unix_timestamp()
