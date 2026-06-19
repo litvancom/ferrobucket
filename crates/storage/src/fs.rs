@@ -1,10 +1,11 @@
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use time::OffsetDateTime;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 
 use crate::meta::{BucketInfo, read_sidecar, write_sidecar};
@@ -376,6 +377,7 @@ impl Storage for FsStorage {
         &self,
         bucket: &str,
         key: &str,
+        range: Option<crate::range::ByteRange>,
     ) -> Result<
         (
             ObjectMeta,
@@ -386,8 +388,41 @@ impl Storage for FsStorage {
         validate_bucket_name(bucket)?;
         let encoded_key = encode_key(key)?;
         // Read sidecar first — a missing sidecar means NoSuchKey.
+        // Range resolution happens AFTER the sidecar read so a missing key always
+        // returns NoSuchKey (not RangeNotSatisfiable).
         let meta = read_sidecar(&self.meta_path(bucket, &encoded_key)).await?;
-        let stream = stream_object(&self.object_path(bucket, &encoded_key)).await?;
+
+        let stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send>> = match range {
+            // None: full-object stream — identical to Phase 1 (non-regression).
+            None => stream_object(&self.object_path(bucket, &encoded_key)).await?,
+
+            // Some: resolve the range against the actual object length, then seek + bound.
+            Some(byte_range) => {
+                let resolved = byte_range
+                    .resolve(meta.size)
+                    .ok_or(StorageError::RangeNotSatisfiable)?;
+
+                // Open the file, seek to the start of the window, and bound to `length`.
+                // Security: `resolved.start + resolved.length <= meta.size` is guaranteed
+                // by `ByteRange::resolve` (T-02-01, T-02-02) — no read past object bytes.
+                let obj_path = self.object_path(bucket, &encoded_key);
+                let mut file = tokio::fs::File::open(&obj_path).await.map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        StorageError::NoSuchKey(key.to_owned())
+                    } else {
+                        StorageError::Io(e)
+                    }
+                })?;
+                file.seek(SeekFrom::Start(resolved.start))
+                    .await
+                    .map_err(StorageError::Io)?;
+
+                // Bound the read to exactly `length` bytes before handing to ReaderStream.
+                let bounded = file.take(resolved.length);
+                Box::pin(ReaderStream::new(bounded))
+            }
+        };
+
         Ok((meta, stream))
     }
 
@@ -657,7 +692,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (_, mut stream) = storage.get_object("test-bucket", "fox.txt").await.unwrap();
+        let (_, mut stream) = storage.get_object("test-bucket", "fox.txt", None).await.unwrap();
         let mut received = Vec::new();
         use futures::StreamExt;
         while let Some(chunk) = stream.next().await {
@@ -675,7 +710,7 @@ mod tests {
             .unwrap();
 
         let (meta, mut stream) = storage
-            .get_object("test-bucket", "empty.bin")
+            .get_object("test-bucket", "empty.bin", None)
             .await
             .unwrap();
         assert_eq!(meta.size, 0);
@@ -704,7 +739,7 @@ mod tests {
     #[tokio::test]
     async fn get_missing_key_errors() {
         let (_dir, storage) = make_storage_with_bucket().await;
-        match storage.get_object("test-bucket", "missing.txt").await {
+        match storage.get_object("test-bucket", "missing.txt", None).await {
             Err(StorageError::NoSuchKey(_)) => {}
             Ok(_) => panic!("expected NoSuchKey for get_object, got Ok"),
             Err(e) => panic!("expected NoSuchKey for get_object, got Err({:?})", e),
@@ -768,7 +803,7 @@ mod tests {
                 Err(StorageError::InvalidBucketName(_)) => {}
                 other => panic!("put_object({:?}) expected InvalidBucketName, got {:?}", bad, other),
             }
-            match storage.get_object(bad, "k").await {
+            match storage.get_object(bad, "k", None).await {
                 Err(StorageError::InvalidBucketName(_)) => {}
                 Err(e) => panic!("get_object({:?}) expected InvalidBucketName, got {:?}", bad, e),
                 Ok(_) => panic!("get_object({:?}) expected InvalidBucketName, got Ok", bad),
@@ -840,10 +875,162 @@ mod tests {
         assert!(!storage.meta_path("test-bucket", &encoded).exists());
 
         // Subsequent get_object must return NoSuchKey.
-        match storage.get_object("test-bucket", "to-delete.txt").await {
+        match storage.get_object("test-bucket", "to-delete.txt", None).await {
             Err(StorageError::NoSuchKey(_)) => {}
             Ok(_) => panic!("expected NoSuchKey after delete, got Ok"),
             Err(e) => panic!("expected NoSuchKey after delete, got Err({:?})", e),
+        }
+    }
+
+    // ── Ranged get_object tests (D-04, T-02-01) ───────────────────────────────
+
+    /// Helper: collect stream bytes into a Vec.
+    async fn collect_stream(
+        stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send>>,
+    ) -> Vec<u8> {
+        use futures::StreamExt;
+        let mut out = Vec::new();
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.next().await {
+            out.extend_from_slice(&chunk.unwrap());
+        }
+        out
+    }
+
+    // Non-regression: get_object(None) returns the full object byte-for-byte.
+    #[tokio::test]
+    async fn get_object_none_returns_full_object() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let data: Vec<u8> = (0u8..=255u8).cycle().take(1000).collect();
+        storage
+            .put_object("test-bucket", "data.bin", body_owned(data.clone()), None)
+            .await
+            .unwrap();
+
+        let (meta, stream) = storage
+            .get_object("test-bucket", "data.bin", None)
+            .await
+            .unwrap();
+
+        // meta.size must be the full object size.
+        assert_eq!(meta.size, 1000);
+        let received = collect_stream(stream).await;
+        assert_eq!(received, data, "None range must return full object bytes");
+    }
+
+    // D-04 bytes=0-499 over 1000 bytes → exactly 500 bytes equal to bytes[0..500].
+    #[tokio::test]
+    async fn get_object_range_full_bytes_0_499() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let data: Vec<u8> = (0u8..=255u8).cycle().take(1000).collect();
+        storage
+            .put_object("test-bucket", "data.bin", body_owned(data.clone()), None)
+            .await
+            .unwrap();
+
+        let (meta, stream) = storage
+            .get_object(
+                "test-bucket",
+                "data.bin",
+                Some(crate::range::ByteRange::full_from(0, 499)),
+            )
+            .await
+            .unwrap();
+
+        // meta.size stays the FULL object size (the adapter sets Content-Range from the window).
+        assert_eq!(meta.size, 1000, "meta.size must be full object size for ranged get");
+        let received = collect_stream(stream).await;
+        assert_eq!(received.len(), 500);
+        assert_eq!(received, &data[0..500], "ranged get must return exact byte window");
+    }
+
+    // D-04 bytes=500- over 1000 bytes → bytes 500..1000 (500 bytes).
+    #[tokio::test]
+    async fn get_object_range_open_from_500() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let data: Vec<u8> = (0u8..=255u8).cycle().take(1000).collect();
+        storage
+            .put_object("test-bucket", "data.bin", body_owned(data.clone()), None)
+            .await
+            .unwrap();
+
+        let (_, stream) = storage
+            .get_object(
+                "test-bucket",
+                "data.bin",
+                Some(crate::range::ByteRange::open_from(500)),
+            )
+            .await
+            .unwrap();
+
+        let received = collect_stream(stream).await;
+        assert_eq!(received.len(), 500);
+        assert_eq!(received, &data[500..1000]);
+    }
+
+    // D-04 bytes=-200 over 1000 bytes → last 200 bytes.
+    #[tokio::test]
+    async fn get_object_range_suffix_200() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let data: Vec<u8> = (0u8..=255u8).cycle().take(1000).collect();
+        storage
+            .put_object("test-bucket", "data.bin", body_owned(data.clone()), None)
+            .await
+            .unwrap();
+
+        let (_, stream) = storage
+            .get_object(
+                "test-bucket",
+                "data.bin",
+                Some(crate::range::ByteRange::suffix(200)),
+            )
+            .await
+            .unwrap();
+
+        let received = collect_stream(stream).await;
+        assert_eq!(received.len(), 200);
+        assert_eq!(received, &data[800..1000]);
+    }
+
+    // D-04 unsatisfiable: open_from past EOF → RangeNotSatisfiable (distinct from NoSuchKey).
+    #[tokio::test]
+    async fn get_object_range_unsatisfiable_returns_range_not_satisfiable() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        storage
+            .put_object("test-bucket", "data.bin", body_owned(vec![0u8; 1000]), None)
+            .await
+            .unwrap();
+
+        match storage
+            .get_object(
+                "test-bucket",
+                "data.bin",
+                Some(crate::range::ByteRange::open_from(99999)),
+            )
+            .await
+        {
+            Err(StorageError::RangeNotSatisfiable) => {}
+            Ok(_) => panic!("expected RangeNotSatisfiable, got Ok"),
+            Err(e) => panic!("expected RangeNotSatisfiable, got {:?}", e),
+        }
+    }
+
+    // Ranged get on a missing key returns NoSuchKey (range resolution after sidecar read).
+    #[tokio::test]
+    async fn get_object_range_missing_key_returns_no_such_key() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+
+        match storage
+            .get_object(
+                "test-bucket",
+                "missing.bin",
+                Some(crate::range::ByteRange::full_from(0, 499)),
+            )
+            .await
+        {
+            Err(StorageError::NoSuchKey(_)) => {}
+            Ok(_) => panic!("expected NoSuchKey for missing key with range, got Ok"),
+            Err(e) => panic!("expected NoSuchKey for missing key with range, got {:?}", e),
         }
     }
 }

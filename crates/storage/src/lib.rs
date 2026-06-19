@@ -42,6 +42,11 @@ pub enum StorageError {
     #[error("invalid continuation token")]
     InvalidContinuationToken,
 
+    /// Range not satisfiable (HTTP 416). Returned when the requested byte range
+    /// lies entirely beyond the object's length (D-04, T-02-01).
+    #[error("range not satisfiable")]
+    RangeNotSatisfiable,
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -71,6 +76,7 @@ pub trait Storage: Send + Sync {
         &self,
         bucket: &str,
         key: &str,
+        range: Option<crate::range::ByteRange>,
     ) -> Result<
         (
             ObjectMeta,
