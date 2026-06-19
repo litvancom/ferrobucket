@@ -57,7 +57,8 @@ impl FsStorage {
 }
 
 /// Validate an S3 bucket name against strict DNS-safe rules (D-09, RESEARCH.md §"Bucket Name Validation").
-/// Accepts: 3–63 chars, only `[a-z0-9.-]`, no leading/trailing hyphen, no consecutive dots.
+/// Accepts: 3–63 chars, only `[a-z0-9.-]`, no leading/trailing hyphen, no leading/trailing
+/// dot, no consecutive dots, and not formatted as an IPv4 address (WR-07).
 pub fn validate_bucket_name(name: &str) -> Result<(), StorageError> {
     let n = name.len();
     if !(3..=63).contains(&n) {
@@ -67,11 +68,30 @@ pub fn validate_bucket_name(name: &str) -> Result<(), StorageError> {
         .bytes()
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.');
     let no_leading_trailing_hyphen = !name.starts_with('-') && !name.ends_with('-');
+    // Leading/trailing dots produce directories with leading/trailing dots and are
+    // rejected by S3 (WR-07).
+    let no_leading_trailing_dot = !name.starts_with('.') && !name.ends_with('.');
     let no_consecutive_dots = !name.contains("..");
-    if !valid_chars || !no_leading_trailing_hyphen || !no_consecutive_dots {
+    // S3 rejects bucket names formatted as IPv4 addresses (e.g. 192.168.0.1).
+    let not_ip_formatted = !is_ipv4_formatted(name);
+    if !valid_chars
+        || !no_leading_trailing_hyphen
+        || !no_leading_trailing_dot
+        || !no_consecutive_dots
+        || !not_ip_formatted
+    {
         return Err(StorageError::InvalidBucketName(name.to_owned()));
     }
     Ok(())
+}
+
+/// True if `name` looks like a dotted-decimal IPv4 address (four numeric octets).
+fn is_ipv4_formatted(name: &str) -> bool {
+    let parts: Vec<&str> = name.split('.').collect();
+    parts.len() == 4
+        && parts.iter().all(|p| {
+            !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u8>().is_ok()
+        })
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
@@ -502,6 +522,35 @@ mod tests {
     }
 
     // ── Bucket CRUD ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_name_validation_rejects_leading_trailing_dot() {
+        // WR-07
+        assert!(matches!(
+            validate_bucket_name(".bucket"),
+            Err(StorageError::InvalidBucketName(_))
+        ));
+        assert!(matches!(
+            validate_bucket_name("bucket."),
+            Err(StorageError::InvalidBucketName(_))
+        ));
+    }
+
+    #[test]
+    fn bucket_name_validation_rejects_ipv4() {
+        // WR-07: IPv4-formatted names must be rejected.
+        assert!(matches!(
+            validate_bucket_name("192.168.0.1"),
+            Err(StorageError::InvalidBucketName(_))
+        ));
+        assert!(matches!(
+            validate_bucket_name("10.0.0.255"),
+            Err(StorageError::InvalidBucketName(_))
+        ));
+        // Dotted names that are NOT all numeric octets remain valid.
+        assert!(validate_bucket_name("a.b.c").is_ok());
+        assert!(validate_bucket_name("1.2.3.4.5").is_ok());
+    }
 
     #[tokio::test]
     async fn create_bucket_creates_dir() {
