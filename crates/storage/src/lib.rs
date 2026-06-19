@@ -8,11 +8,13 @@ pub mod etag;
 pub mod fs;
 pub mod list;
 pub mod meta;
+pub mod range;
 
 pub use encode::{decode_key, encode_key};
 pub use fs::FsStorage;
 pub use list::{ListV2Req, ListV2Res};
 pub use meta::{BucketInfo, ObjectMeta};
+pub use range::ByteRange;
 
 #[derive(Error, Debug)]
 pub enum StorageError {
