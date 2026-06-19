@@ -20,6 +20,10 @@ http-body     = { version = "1" }
 http-body-util = { version = "0.1" }
 time          = { version = "0.3", features = ["serde-human-readable"] }
 anyhow        = "1"
+# Promoted from dev-deps: presign_url needs these at runtime (T-03-SC, no new crates).
+hmac = "=0.13.0-rc.5"
+sha2 = "=0.11.0-rc.5"
+hex = "0.4.3"
 
 [dev-dependencies]
 # aws-sdk-s3 = { version = "..." }  # Added by Plan 03 when compatibility with
@@ -28,6 +32,3 @@ anyhow        = "1"
 tokio      = { version = "1", features = ["rt-multi-thread", "macros"] }
 tempfile   = "3"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "stream"] }
-hmac = "=0.13.0-rc.5"
-sha2 = "=0.11.0-rc.5"
-hex = "0.4.3"
