@@ -337,7 +337,7 @@ output-name = "ferrobucket-ui"
 
 ---
 
-## 4. Name Availability
+## 4. Name availability
 
 > Checked at plan execution time (2026-06-19) per D-05. Results recorded with the exact command run and
 > the check date — each entry is its own source citation (D-04). Re-verify before any publish in Phase 5.
