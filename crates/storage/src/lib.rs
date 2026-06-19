@@ -44,6 +44,10 @@ pub enum StorageError {
 
 /// Phase-1 lean subset of the Storage trait (D-05).
 /// Native async fn in trait — Rust 1.75+ RPITIT; no #[async_trait] needed.
+/// Note: async fn in trait is not object-safe (no `dyn Storage`); fine for Phase 1
+/// where callers hold FsStorage concretely. If dyn Storage is needed later, add
+/// async_trait (PATTERNS.md §Object-safety caveat).
+#[allow(async_fn_in_trait)]
 pub trait Storage: Send + Sync {
     async fn list_buckets(&self) -> Result<Vec<BucketInfo>, StorageError>;
 
