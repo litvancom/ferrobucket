@@ -2,3 +2,25 @@
 name = "ferrobucket-server"
 version = "0.1.0"
 edition.workspace = true
+
+[[bin]]
+name = "ferrobucket"
+path = "src/main.rs"
+
+[dependencies]
+ferrobucket-storage = { path = "../storage" }
+s3s           = { version = "=0.13.0" }
+axum          = { version = "=0.8.8" }
+tokio         = { version = "1", features = ["full"] }
+clap          = { version = "4", features = ["derive"] }
+async-trait   = { version = "=0.1.89" }
+bytes         = { version = "1" }
+futures       = { version = "0.3" }
+http-body-util = { version = "0.1" }
+time          = { version = "0.3", features = ["serde-human-readable"] }
+anyhow        = "1"
+
+[dev-dependencies]
+aws-sdk-s3 = { version = "1" }
+tokio      = { version = "1", features = ["rt-multi-thread", "macros"] }
+tempfile   = "3"
