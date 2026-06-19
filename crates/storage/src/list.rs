@@ -15,3 +15,14 @@ pub struct ListV2Res {
     pub next_continuation_token: Option<String>,
     pub is_truncated: bool,
 }
+
+/// Stub free function — Plan 02 wires the delegation call site here;
+/// Plan 03 replaces this with the full listing algorithm.
+pub async fn list_objects_v2(
+    _storage: &crate::fs::FsStorage,
+    _bucket: &str,
+    _req: ListV2Req,
+) -> Result<ListV2Res, crate::StorageError> {
+    // Plan 03 fills this with the real listing algorithm.
+    Ok(ListV2Res::default())
+}

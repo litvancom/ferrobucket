@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 11c1ed8d9844b64b80b913c940c7115f0ce742e4dc0f5df966df95a66f9fbb62 # shrinks to key = "a"
 cc 9e2010ab681a1cceefec823159a2113399b1bcf8cfaca41a07945487bd8cffc5 # shrinks to key = "{0a0[ a [[ a  [a [A AAA  :0  A{AA0 a   A0Aa : A:  a   a { aAAAa: [aa0{:AA :Aa[a Aa[   0a{aA:aa   {aA[Aa[A A{[a AAAAAa::0a AA A00"
+cc c9587ba2f873e152bbf6bf1ce28aad8e4b97b0edaf82e3f20ce34c85ff413e28 # shrinks to key = ".."

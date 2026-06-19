@@ -10,6 +10,7 @@ pub mod list;
 pub mod meta;
 
 pub use encode::{decode_key, encode_key};
+pub use fs::FsStorage;
 pub use meta::{BucketInfo, ObjectMeta};
 
 #[derive(Error, Debug)]
