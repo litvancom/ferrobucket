@@ -77,7 +77,7 @@ impl S3 for YourStorage {
 - `#[async_trait::async_trait]` is **required** on the `impl` block — s3s 0.13.0 uses async-trait desugaring, NOT RPITIT/`impl Future`.
 - `S3Result<T>` is a type alias for `Result<T, S3Error>`.
 - All ~150 trait methods have **default impls** returning `Err(s3_error!(NotImplemented))` — only override the methods you implement; the rest are covered by defaults.
-- The trait bound for `S3ServiceBuilder::new(storage)` is `T: S3 + Clone + Send + Sync + 'static`.
+- `S3ServiceBuilder::new(storage)` takes `storage: impl S3`; the `S3` trait bound is `S3: Send + Sync + 'static` (`s3s-0.13.0/src/s3_trait.rs:10`, `src/service.rs:156`). `Clone` is **NOT** required on the storage type — the spike derived `Clone` but it is not part of the bound (verified by removing `#[derive(Clone)]` and rebuilding: still exit 0). The built `S3Service` value is itself `Clone`.
 
 **Source:** `docs.rs/s3s/0.13.0/s3s/trait.S3.html` + compile proof in `scratch/s3s-spike/src/main.rs`
 
@@ -157,7 +157,7 @@ let PutObjectInput { bucket, key, body, content_type, .. } = req.input;
 use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
 
-// Build the service (T: S3 + Clone + Send + Sync + 'static)
+// Build the service (storage: impl S3; S3: Send + Sync + 'static — Clone NOT required on storage)
 let mut b = S3ServiceBuilder::new(YourStorage);
 b.set_auth(SimpleAuth::from_single("ACCESS_KEY", "SECRET_KEY"));
 let service = b.build();   // → S3Service (implements Clone + tower::Service + hyper::Service)
