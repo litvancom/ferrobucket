@@ -11,6 +11,7 @@ pub mod meta;
 
 pub use encode::{decode_key, encode_key};
 pub use fs::FsStorage;
+pub use list::{ListV2Req, ListV2Res};
 pub use meta::{BucketInfo, ObjectMeta};
 
 #[derive(Error, Debug)]
