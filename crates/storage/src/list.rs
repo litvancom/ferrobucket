@@ -95,20 +95,27 @@ pub async fn list_objects_v2(
     }
 
     // ── Step 5: derive CommonPrefixes + direct objects via delimiter ──────────
+    // S3 caps max_keys at 1000; a value of 0 would otherwise yield an empty page
+    // that is still flagged truncated with no advancing token (WR-04).
     let prefix_str = req.prefix.as_deref().unwrap_or("");
-    let max_keys = req.max_keys.unwrap_or(1000);
+    let max_keys = req.max_keys.unwrap_or(1000).clamp(1, 1000);
 
-    let mut common_prefixes: Vec<String> = Vec::new();
-    // Pairs of (key, is_common_prefix) describing the ordered result before capping.
-    // We need to track the last *key* emitted (not common-prefix) for the token.
-    // We collect (key, kind) then cap.
     enum Item {
         Object(String),       // the key
         CommonPrefix(String), // the collapsed prefix string
     }
 
-    let mut items: Vec<Item> = Vec::new();
-    let mut seen_prefixes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Each emitted result carries the *last underlying key* that contributed to it.
+    // For a CommonPrefix this is the lexicographically-greatest key collapsed under it,
+    // so the continuation token covers the entire CP run — eliminating the page-skip /
+    // data-loss bug from the previous two-pass derivation (CR-01). Because `keys` is
+    // sorted, the keys under a given CP are contiguous, so we can extend the boundary of
+    // the trailing CP in place rather than tracking a separate seen-set.
+    struct Emitted {
+        item: Item,
+        last_key: String,
+    }
+    let mut emitted: Vec<Emitted> = Vec::new();
 
     for key in &keys {
         if let Some(ref delimiter) = req.delimiter {
@@ -121,74 +128,46 @@ pub async fn list_objects_v2(
                     prefix_str,
                     &remainder[..delim_pos + delimiter.len()]
                 );
-                if seen_prefixes.insert(cp.clone()) {
-                    items.push(Item::CommonPrefix(cp));
+                match emitted.last_mut() {
+                    // Same CP as the trailing item: extend its boundary key instead of
+                    // emitting a duplicate or advancing the token past the run.
+                    Some(e) if matches!(&e.item, Item::CommonPrefix(x) if *x == cp) => {
+                        e.last_key = key.clone();
+                    }
+                    _ => emitted.push(Emitted {
+                        item: Item::CommonPrefix(cp),
+                        last_key: key.clone(),
+                    }),
                 }
                 // Keys under a CommonPrefix do NOT appear as direct objects.
                 continue;
             }
         }
         // No delimiter match → direct object.
-        items.push(Item::Object(key.clone()));
+        emitted.push(Emitted {
+            item: Item::Object(key.clone()),
+            last_key: key.clone(),
+        });
     }
 
     // ── Step 6: cap at max_keys ───────────────────────────────────────────────
-    let is_truncated = items.len() > max_keys;
-    let capped: Vec<Item> = items.into_iter().take(max_keys).collect();
-
-    // Build the last key emitted (for next_continuation_token).
-    // The token is based on the last *object key* in the capped result;
-    // for a page ending on a CommonPrefix we use the last key that contributed to it.
-    // S3 spec: token is based on the last key returned (object or last key under CP).
-    // Simple implementation: use the last key from the pre-cap `keys` slice that
-    // was consumed (i.e., the key at index max_keys - 1 in the original ordered keys).
-    //
-    // We track which original key index is the last consumed in `capped`.
-    let mut last_consumed_key: Option<String> = None;
-    {
-        // Re-derive: walk keys again up to max_keys items the same way, track last key used.
-        let mut count = 0usize;
-        let mut seen2: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for key in &keys {
-            if count >= max_keys {
-                break;
-            }
-            if let Some(ref delimiter) = req.delimiter {
-                let remainder = &key[prefix_str.len()..];
-                if let Some(delim_pos) = remainder.find(delimiter.as_str()) {
-                    let cp = format!(
-                        "{}{}",
-                        prefix_str,
-                        &remainder[..delim_pos + delimiter.len()]
-                    );
-                    if seen2.insert(cp) {
-                        count += 1;
-                        last_consumed_key = Some(key.clone());
-                    } else {
-                        // Still in the same common prefix; update last_consumed_key
-                        // so the token covers all keys up to the CP boundary.
-                        last_consumed_key = Some(key.clone());
-                    }
-                    continue;
-                }
-            }
-            count += 1;
-            last_consumed_key = Some(key.clone());
-        }
-    }
-
+    let is_truncated = emitted.len() > max_keys;
+    // Token boundary is the last underlying key of the max_keys-th emitted item.
     let next_continuation_token = if is_truncated {
-        last_consumed_key
-            .as_deref()
-            .map(encode_continuation_token)
+        Some(encode_continuation_token(&emitted[max_keys - 1].last_key))
     } else {
         None
     };
+    let capped: Vec<Item> = emitted
+        .into_iter()
+        .take(max_keys)
+        .map(|e| e.item)
+        .collect();
 
     // ── Build output ──────────────────────────────────────────────────────────
     let meta_dir = storage.meta_dir(bucket);
     let mut objects: Vec<crate::meta::ObjectMeta> = Vec::new();
-    common_prefixes.clear();
+    let mut common_prefixes: Vec<String> = Vec::new();
 
     for item in capped {
         match item {
@@ -378,6 +357,81 @@ mod tests {
         let mut expected = all_keys.clone();
         expected.sort_unstable();
         assert_eq!(seen, expected, "pagination must cover every key exactly once");
+    }
+
+    #[tokio::test]
+    async fn list_pagination_mid_common_prefix_no_skip() {
+        // CR-01 regression: a page that ends inside a CommonPrefix run must not skip
+        // keys collapsed under that CP on the next page. With delimiter "/" and
+        // max_keys=2, the first page can end on the "dir/" CP whose run spans several
+        // underlying keys; the continuation token must resume past the *whole* run.
+        let (_dir, storage) = make_storage().await;
+        // CP "a/" collapses {a/1, a/2, a/3}; CP "b/" collapses {b/1, b/2};
+        // top-level object "c". Interleaves delimited and non-delimited keys.
+        for k in &["a/1", "a/2", "a/3", "b/1", "b/2", "c"] {
+            put(&storage, k).await;
+        }
+
+        let mut objects: Vec<String> = Vec::new();
+        let mut prefixes: Vec<String> = Vec::new();
+        let mut token: Option<String> = None;
+
+        loop {
+            let res = list_objects_v2(
+                &storage,
+                BUCKET,
+                ListV2Req {
+                    delimiter: Some("/".to_owned()),
+                    max_keys: Some(2),
+                    continuation_token: token.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+            objects.extend(res.objects.iter().map(|o| o.key.clone()));
+            prefixes.extend(res.common_prefixes.iter().cloned());
+
+            if res.is_truncated {
+                token = res.next_continuation_token;
+                assert!(token.is_some(), "is_truncated but no next token");
+            } else {
+                break;
+            }
+        }
+
+        prefixes.sort_unstable();
+        prefixes.dedup();
+        // Both CPs must appear exactly once, the top-level object must not be dropped.
+        assert_eq!(prefixes, vec!["a/", "b/"], "CommonPrefixes must not be skipped");
+        assert_eq!(objects, vec!["c"], "top-level object must not be skipped");
+    }
+
+    #[tokio::test]
+    async fn list_max_keys_zero_clamped() {
+        // WR-04 regression: max_keys=0 must clamp to >=1, never produce a truncated
+        // page with a non-advancing token (which would loop forever).
+        let (_dir, storage) = make_storage().await;
+        for k in &["a", "b"] {
+            put(&storage, k).await;
+        }
+
+        let res = list_objects_v2(
+            &storage,
+            BUCKET,
+            ListV2Req {
+                max_keys: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Clamped to 1: exactly one object returned, truncated, with an advancing token.
+        assert_eq!(res.objects.len(), 1);
+        assert!(res.is_truncated);
+        assert!(res.next_continuation_token.is_some());
     }
 
     #[tokio::test]
