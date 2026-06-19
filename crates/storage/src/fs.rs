@@ -237,9 +237,57 @@ impl Storage for FsStorage {
             return Err(StorageError::BucketNotEmpty(name.to_owned()));
         }
 
-        tokio::fs::remove_dir_all(&bucket_dir)
-            .await
-            .map_err(StorageError::Io)?;
+        // Remove the structural pieces individually rather than force-deleting the whole
+        // tree (WR-02). `remove_dir` is non-recursive: if a concurrent put_object slipped
+        // an object into objects/ after the emptiness check, remove_dir(objects) fails with
+        // a non-empty error and the live data survives instead of being silently destroyed.
+        // The metadata sidecar dir is removed afterwards (best-effort cleanup of an empty
+        // meta/ left from prior deletes is fine; a non-empty meta/ surfaces as an error).
+        let meta_dir = self.meta_dir(name);
+        let bucket_json = bucket_dir.join(".bucket.json");
+
+        // Remove a directory non-recursively, mapping a "directory not empty" failure to
+        // BucketNotEmpty. ErrorKind for ENOTEMPTY is not stably exposed across Rust
+        // versions, so on any non-NotFound remove failure we re-check whether the dir
+        // still has entries: if so, the race materialized and we surface BucketNotEmpty.
+        async fn remove_dir_guarded(
+            dir: &Path,
+            name: &str,
+        ) -> Result<(), StorageError> {
+            match tokio::fs::remove_dir(dir).await {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => {
+                    let dir_owned = dir.to_path_buf();
+                    let still_has_entries = tokio::task::spawn_blocking(move || {
+                        std::fs::read_dir(&dir_owned)
+                            .map(|mut rd| rd.next().is_some())
+                            .unwrap_or(false)
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if still_has_entries {
+                        Err(StorageError::BucketNotEmpty(name.to_owned()))
+                    } else {
+                        Err(StorageError::Io(e))
+                    }
+                }
+            }
+        }
+
+        remove_dir_guarded(&objects_dir, name).await?;
+        // meta/ holds only sidecars; with objects/ empty it should be empty too.
+        remove_dir_guarded(&meta_dir, name).await?;
+        match tokio::fs::remove_file(&bucket_json).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(StorageError::Io(e)),
+        }
+        match tokio::fs::remove_dir(&bucket_dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(StorageError::Io(e)),
+        }
         Ok(())
     }
 
@@ -591,6 +639,26 @@ mod tests {
             .collect();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].file_name().to_string_lossy().as_ref(), encoded);
+    }
+
+    #[tokio::test]
+    async fn delete_nonempty_bucket_errors_and_preserves_data() {
+        // WR-02 regression: deleting a non-empty bucket must fail with BucketNotEmpty
+        // and must NOT destroy the live object (no force remove_dir_all).
+        let (_dir, storage) = make_storage_with_bucket().await;
+        storage
+            .put_object("test-bucket", "keep.txt", body_from(b"data"), None)
+            .await
+            .unwrap();
+
+        match storage.delete_bucket("test-bucket").await {
+            Err(StorageError::BucketNotEmpty(_)) => {}
+            other => panic!("expected BucketNotEmpty, got {:?}", other),
+        }
+
+        // The object must still be readable.
+        let head = storage.head_object("test-bucket", "keep.txt").await.unwrap();
+        assert_eq!(head.size, 4);
     }
 
     #[tokio::test]
