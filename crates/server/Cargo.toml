@@ -12,7 +12,7 @@ ferrobucket-storage = { path = "../storage" }
 s3s           = { version = "=0.13.0" }
 axum          = { version = "=0.8.8" }
 tokio         = { version = "1", features = ["full"] }
-clap          = { version = "4", features = ["derive"] }
+clap          = { version = "4", features = ["derive", "env"] }
 async-trait   = { version = "=0.1.89" }
 bytes         = { version = "1" }
 futures       = { version = "0.3" }
