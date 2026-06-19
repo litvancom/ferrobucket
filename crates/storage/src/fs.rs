@@ -370,9 +370,13 @@ impl Storage for FsStorage {
             }
             Err(e) => return Err(StorageError::Io(e)),
         }
-        // Remove sidecar (best-effort; ignore NotFound).
+        // Remove sidecar. Only NotFound is ignored (WR-03): swallowing every error
+        // would leak an orphaned sidecar after a real I/O failure, leaving HEAD
+        // resolving while GET 404s for the now-bodyless key.
         match tokio::fs::remove_file(&meta_path).await {
-            Ok(()) | Err(_) => {}
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(StorageError::Io(e)),
         }
         Ok(())
     }
