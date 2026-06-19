@@ -178,8 +178,20 @@ impl Storage for FsStorage {
     async fn create_bucket(&self, name: &str) -> Result<(), StorageError> {
         validate_bucket_name(name)?;
         let bucket_dir = self.bucket_path(name);
-        if bucket_dir.exists() {
-            return Err(StorageError::BucketAlreadyExists(name.to_owned()));
+        // Atomic ownership claim (WR-01): create_dir is non-recursive and fails with
+        // AlreadyExists, so two concurrent create_bucket calls cannot both "succeed".
+        // The data_root itself must exist first (create_dir does not create parents).
+        if let Some(parent) = bucket_dir.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(StorageError::Io)?;
+        }
+        match tokio::fs::create_dir(&bucket_dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(StorageError::BucketAlreadyExists(name.to_owned()));
+            }
+            Err(e) => return Err(StorageError::Io(e)),
         }
         // Create objects/ and meta/ subdirectories.
         tokio::fs::create_dir_all(self.objects_dir(name))
