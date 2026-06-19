@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use time::OffsetDateTime;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 
 use crate::meta::{BucketInfo, read_sidecar, write_sidecar};
+use crate::multipart::{MultipartMeta, read_multipart_meta, write_multipart_meta};
 use crate::{ObjectMeta, StorageError, Storage};
 use crate::encode::encode_key;
 use crate::list::{ListV2Req, ListV2Res};
@@ -54,6 +55,23 @@ impl FsStorage {
 
     fn meta_path(&self, bucket: &str, encoded_key: &str) -> PathBuf {
         self.meta_dir(bucket).join(format!("{}.json", encoded_key))
+    }
+
+    /// `<data>/.uploads/` — staging root for multipart uploads (D-05a: never inside a bucket dir).
+    fn uploads_root(&self) -> PathBuf {
+        self.data_root.join(".uploads")
+    }
+
+    /// `<data>/.uploads/<upload_id>/` — staging directory for one upload.
+    /// uploadIds are SERVER-GENERATED uuid v4 (`[0-9a-f-]` only) — no traversal risk (T-03-01).
+    fn upload_dir(&self, upload_id: &str) -> PathBuf {
+        self.uploads_root().join(upload_id)
+    }
+
+    /// `<data>/.uploads/<upload_id>/<part_number>` — on-disk path for one part.
+    /// part_number is guarded to be > 0 before this is called (Pitfall 3, T-03-01).
+    fn part_path(&self, upload_id: &str, part_number: i32) -> PathBuf {
+        self.upload_dir(upload_id).join(part_number.to_string())
     }
 }
 
@@ -474,6 +492,217 @@ impl Storage for FsStorage {
         // Thin delegation to crate::list::list_objects_v2 (Plan 03 fills the algorithm).
         crate::list::list_objects_v2(self, bucket, req).await
     }
+
+    // ── Multipart upload methods ──────────────────────────────────────────────
+
+    async fn create_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        content_type: Option<String>,
+    ) -> Result<String, StorageError> {
+        // Reject traversal-unsafe bucket names before any path arithmetic (T-03-02).
+        validate_bucket_name(bucket)?;
+        // Bucket must exist (same guard as put_object).
+        if !self.bucket_path(bucket).exists() {
+            return Err(StorageError::NoSuchBucket(bucket.to_owned()));
+        }
+
+        let upload_id = uuid::Uuid::new_v4().to_string();
+        let dir = self.upload_dir(&upload_id);
+
+        // Create the staging directory before writing the sidecar (Pitfall 4).
+        tokio::fs::create_dir_all(&dir).await.map_err(StorageError::Io)?;
+
+        // Write _meta.json atomically so Complete can resolve bucket/key/content_type.
+        let meta = MultipartMeta {
+            bucket: bucket.to_owned(),
+            key: key.to_owned(),
+            content_type,
+        };
+        let meta_path = dir.join("_meta.json");
+        write_multipart_meta(&meta_path, &meta).await?;
+
+        Ok(upload_id)
+    }
+
+    async fn upload_part(
+        &self,
+        _bucket: &str,
+        upload_id: &str,
+        part_number: i32,
+        body: impl Stream<Item = std::io::Result<Bytes>> + Send,
+    ) -> Result<String, StorageError> {
+        // Guard: part numbers must be positive (Pitfall 3, T-03-01).
+        if part_number <= 0 {
+            return Err(StorageError::InvalidPartNumber(part_number));
+        }
+
+        let dir = self.upload_dir(upload_id);
+        if !dir.exists() {
+            return Err(StorageError::NoSuchUpload(upload_id.to_owned()));
+        }
+
+        // Stream body to a temp file in the staging dir (same-dir avoids EXDEV — Pitfall 1).
+        let tmp = tempfile::Builder::new()
+            .tempfile_in(&dir)
+            .map_err(StorageError::Io)?;
+        let (std_file, tmp_path) = tmp
+            .keep()
+            .map_err(|e| StorageError::Io(std::io::Error::other(e.to_string())))?;
+
+        let part_target = self.part_path(upload_id, part_number);
+        let body = std::pin::pin!(body);
+
+        let write_result = async {
+            let mut file = tokio::fs::File::from_std(std_file);
+            let mut hasher = crate::etag::EtagHasher::new();
+            let mut body = body;
+            while let Some(chunk) = body.next().await {
+                let chunk = chunk.map_err(StorageError::Io)?;
+                hasher.update(&chunk);
+                file.write_all(&chunk).await.map_err(StorageError::Io)?;
+            }
+            file.flush().await.map_err(StorageError::Io)?;
+            drop(file);
+            Ok::<String, StorageError>(hasher.finalize())
+        }
+        .await;
+
+        let etag = match write_result {
+            Ok(e) => e,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(e);
+            }
+        };
+
+        // Atomic rename into the part slot.
+        let tmp_for_rename = tmp_path.clone();
+        let rename = tokio::task::spawn_blocking(move || std::fs::rename(&tmp_for_rename, &part_target))
+            .await
+            .map_err(|_| StorageError::Io(std::io::Error::other("spawn_blocking join error")))?;
+        if let Err(e) = rename {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(StorageError::Io(e));
+        }
+
+        Ok(etag)
+    }
+
+    async fn complete_multipart_upload(
+        &self,
+        _bucket: &str,
+        key: &str,
+        upload_id: &str,
+        parts: Vec<i32>,
+    ) -> Result<ObjectMeta, StorageError> {
+        let upload_dir = self.upload_dir(upload_id);
+
+        // Read MultipartMeta sidecar — NotFound maps to NoSuchUpload.
+        let meta_path = upload_dir.join("_meta.json");
+        let mp_meta = read_multipart_meta(&meta_path).await?;
+
+        // Sort part numbers ascending — D-05b: assemble in order regardless of upload order.
+        let mut sorted_parts = parts;
+        sorted_parts.sort();
+        let part_count = sorted_parts.len();
+
+        // Build chained stream over sorted parts (D-05b streaming concat, never buffered).
+        // Each part file is opened on demand and read via ReaderStream before the next opens.
+        let staging_dir = upload_dir.clone();
+        let chained = futures::stream::iter(sorted_parts)
+            .then(move |part_num| {
+                let path = staging_dir.join(part_num.to_string());
+                async move {
+                    let f = tokio::fs::File::open(&path).await?;
+                    Ok::<_, std::io::Error>(ReaderStream::new(f))
+                }
+            })
+            .try_flatten();
+
+        // Assemble via the atomic write pattern (temp+rename), computing the assembled ETag.
+        let objects_dir = self.objects_dir(&mp_meta.bucket);
+        // Ensure objects_dir exists (bucket was validated at create_multipart_upload time).
+        tokio::fs::create_dir_all(&objects_dir).await.map_err(StorageError::Io)?;
+
+        let encoded_key = encode_key(key)?;
+
+        let tmp = tempfile::Builder::new()
+            .tempfile_in(&objects_dir)
+            .map_err(StorageError::Io)?;
+        let (std_file, tmp_path) = tmp
+            .keep()
+            .map_err(|e| StorageError::Io(std::io::Error::other(e.to_string())))?;
+
+        let write_result = async {
+            let mut file = tokio::fs::File::from_std(std_file);
+            let mut hasher = crate::etag::EtagHasher::new();
+            let mut bytes_written: u64 = 0;
+            futures::pin_mut!(chained);
+            while let Some(chunk) = chained.next().await {
+                let chunk = chunk.map_err(StorageError::Io)?;
+                hasher.update(&chunk);
+                bytes_written += chunk.len() as u64;
+                file.write_all(&chunk).await.map_err(StorageError::Io)?;
+            }
+            file.flush().await.map_err(StorageError::Io)?;
+            drop(file);
+            // D-07: AWS-shaped multipart ETag = <md5hex_of_assembled_bytes>-<part_count>
+            let assembled_etag = format!("{}-{}", hasher.finalize(), part_count);
+            Ok::<(String, u64), StorageError>((assembled_etag, bytes_written))
+        }
+        .await;
+
+        let (assembled_etag, size) = match write_result {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(e);
+            }
+        };
+
+        // Atomic rename of assembled object into place.
+        let target = objects_dir.join(&encoded_key);
+        let tmp_for_rename = tmp_path.clone();
+        let rename = tokio::task::spawn_blocking(move || std::fs::rename(&tmp_for_rename, &target))
+            .await
+            .map_err(|_| StorageError::Io(std::io::Error::other("spawn_blocking join error")))?;
+        if let Err(e) = rename {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(StorageError::Io(e));
+        }
+
+        // Write sidecar AFTER object rename (crash-safe ordering, Pattern 7).
+        let obj_meta = ObjectMeta {
+            key: mp_meta.key.clone(),
+            size,
+            content_type: mp_meta.content_type.unwrap_or_else(|| "application/octet-stream".to_owned()),
+            etag: assembled_etag,
+            last_modified: OffsetDateTime::now_utc(),
+        };
+        write_sidecar(&self.meta_path(&mp_meta.bucket, &encoded_key), &obj_meta).await?;
+
+        // Clean up staging directory AFTER successful object + sidecar write (D-05c).
+        let _ = tokio::fs::remove_dir_all(&upload_dir).await;
+
+        Ok(obj_meta)
+    }
+
+    async fn abort_multipart_upload(
+        &self,
+        _bucket: &str,
+        upload_id: &str,
+    ) -> Result<(), StorageError> {
+        let dir = self.upload_dir(upload_id);
+        tokio::fs::remove_dir_all(&dir).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::NoSuchUpload(upload_id.to_owned())
+            } else {
+                StorageError::Io(e)
+            }
+        })
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -880,6 +1109,211 @@ mod tests {
             Ok(_) => panic!("expected NoSuchKey after delete, got Ok"),
             Err(e) => panic!("expected NoSuchKey after delete, got Err({:?})", e),
         }
+    }
+
+    // ── Multipart upload tests (REQ-multipart) ────────────────────────────────
+
+    #[tokio::test]
+    async fn multipart_create_returns_upload_id() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let upload_id = storage
+            .create_multipart_upload("test-bucket", "test.bin", None)
+            .await
+            .unwrap();
+        // UUID v4 format: 8-4-4-4-12 hex chars with hyphens
+        assert!(!upload_id.is_empty());
+        assert_eq!(upload_id.len(), 36);
+        assert!(upload_id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+    }
+
+    #[tokio::test]
+    async fn multipart_create_absent_bucket_errors() {
+        let dir = tempdir().unwrap();
+        let storage = FsStorage::new(dir.path());
+        match storage
+            .create_multipart_upload("nonexistent", "k", None)
+            .await
+        {
+            Err(StorageError::NoSuchBucket(_)) => {}
+            other => panic!("expected NoSuchBucket, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_part_zero_returns_invalid_part_number() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let upload_id = storage
+            .create_multipart_upload("test-bucket", "k", None)
+            .await
+            .unwrap();
+        match storage
+            .upload_part("test-bucket", &upload_id, 0, body_from(b"x"))
+            .await
+        {
+            Err(StorageError::InvalidPartNumber(0)) => {}
+            other => panic!("expected InvalidPartNumber(0), got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_part_negative_returns_invalid_part_number() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let upload_id = storage
+            .create_multipart_upload("test-bucket", "k", None)
+            .await
+            .unwrap();
+        match storage
+            .upload_part("test-bucket", &upload_id, -5, body_from(b"x"))
+            .await
+        {
+            Err(StorageError::InvalidPartNumber(-5)) => {}
+            other => panic!("expected InvalidPartNumber(-5), got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn multipart_roundtrip_two_parts_in_order() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let upload_id = storage
+            .create_multipart_upload("test-bucket", "assembled.bin", Some("application/octet-stream".to_owned()))
+            .await
+            .unwrap();
+
+        // Upload part 1 and part 2.
+        storage
+            .upload_part("test-bucket", &upload_id, 1, body_from(b"part-one-"))
+            .await
+            .unwrap();
+        storage
+            .upload_part("test-bucket", &upload_id, 2, body_from(b"part-two"))
+            .await
+            .unwrap();
+
+        // Complete with parts in natural order.
+        let obj_meta = storage
+            .complete_multipart_upload("test-bucket", "assembled.bin", &upload_id, vec![1, 2])
+            .await
+            .unwrap();
+
+        // ETag must match <md5hex>-2 pattern (D-07).
+        assert!(
+            obj_meta.etag.ends_with("-2"),
+            "assembled ETag must end with -2, got: {}",
+            obj_meta.etag
+        );
+        let parts: Vec<&str> = obj_meta.etag.splitn(2, '-').collect();
+        assert_eq!(parts[0].len(), 32, "ETag prefix must be 32-char MD5 hex");
+        assert!(parts[0].chars().all(|c| c.is_ascii_hexdigit()));
+
+        // Object body must be part1 || part2.
+        let (_, mut stream) = storage
+            .get_object("test-bucket", "assembled.bin", None)
+            .await
+            .unwrap();
+        let mut received = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            received.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(received, b"part-one-part-two");
+    }
+
+    #[tokio::test]
+    async fn multipart_roundtrip_out_of_order_parts_assembled_ascending() {
+        // Parts submitted as [2, 1] must assemble in ascending order (1 then 2).
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let upload_id = storage
+            .create_multipart_upload("test-bucket", "ordered.bin", None)
+            .await
+            .unwrap();
+
+        storage
+            .upload_part("test-bucket", &upload_id, 1, body_from(b"FIRST"))
+            .await
+            .unwrap();
+        storage
+            .upload_part("test-bucket", &upload_id, 2, body_from(b"SECOND"))
+            .await
+            .unwrap();
+
+        // Complete with parts in REVERSE order — must still assemble ascending.
+        let obj_meta = storage
+            .complete_multipart_upload("test-bucket", "ordered.bin", &upload_id, vec![2, 1])
+            .await
+            .unwrap();
+
+        assert!(obj_meta.etag.ends_with("-2"));
+
+        let (_, mut stream) = storage
+            .get_object("test-bucket", "ordered.bin", None)
+            .await
+            .unwrap();
+        let mut received = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            received.extend_from_slice(&chunk.unwrap());
+        }
+        // Should be FIRST||SECOND, not SECOND||FIRST.
+        assert_eq!(received, b"FIRSTSECOND");
+    }
+
+    #[tokio::test]
+    async fn abort_removes_staging_directory() {
+        let (root_dir, storage) = make_storage_with_bucket().await;
+        let upload_id = storage
+            .create_multipart_upload("test-bucket", "to-abort.bin", None)
+            .await
+            .unwrap();
+
+        storage
+            .upload_part("test-bucket", &upload_id, 1, body_from(b"data"))
+            .await
+            .unwrap();
+
+        // Verify staging dir exists before abort.
+        let staging = root_dir.path().join(".uploads").join(&upload_id);
+        assert!(staging.exists(), "staging dir must exist before abort");
+
+        storage
+            .abort_multipart_upload("test-bucket", &upload_id)
+            .await
+            .unwrap();
+
+        assert!(!staging.exists(), "staging dir must not exist after abort");
+    }
+
+    #[tokio::test]
+    async fn abort_absent_upload_returns_nosuchupload() {
+        let (_dir, storage) = make_storage_with_bucket().await;
+        match storage
+            .abort_multipart_upload("test-bucket", "00000000-0000-0000-0000-000000000000")
+            .await
+        {
+            Err(StorageError::NoSuchUpload(_)) => {}
+            other => panic!("expected NoSuchUpload, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_cleans_staging_directory() {
+        let (root_dir, storage) = make_storage_with_bucket().await;
+        let upload_id = storage
+            .create_multipart_upload("test-bucket", "clean.bin", None)
+            .await
+            .unwrap();
+
+        storage
+            .upload_part("test-bucket", &upload_id, 1, body_from(b"hello"))
+            .await
+            .unwrap();
+
+        let staging = root_dir.path().join(".uploads").join(&upload_id);
+        assert!(staging.exists());
+
+        storage
+            .complete_multipart_upload("test-bucket", "clean.bin", &upload_id, vec![1])
+            .await
+            .unwrap();
+
+        assert!(!staging.exists(), "staging dir must be cleaned up after complete");
     }
 
     // ── Ranged get_object tests (D-04, T-02-01) ───────────────────────────────

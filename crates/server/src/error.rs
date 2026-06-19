@@ -17,6 +17,8 @@ pub fn map_storage_err(err: StorageError) -> S3Error {
         StorageError::InvalidKey => s3_error!(InvalidRequest, "invalid key"),
         StorageError::InvalidContinuationToken => s3_error!(InvalidArgument, "invalid continuation token"),
         StorageError::RangeNotSatisfiable => s3_error!(InvalidRange),
+        StorageError::NoSuchUpload(_) => s3_error!(NoSuchUpload),
+        StorageError::InvalidPartNumber(n) => s3_error!(InvalidArgument, "part number must be positive: {n}"),
         StorageError::Io(e) => s3_error!(e, InternalError, "I/O error"),
     }
 }

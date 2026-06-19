@@ -102,4 +102,40 @@ pub trait Storage: Send + Sync {
         bucket: &str,
         req: crate::list::ListV2Req,
     ) -> Result<crate::list::ListV2Res, StorageError>;
+
+    // ── Multipart upload methods (REQ-multipart, DEC-storage-decoupled) ─────────
+
+    /// Create a new multipart upload and return an opaque upload ID.
+    async fn create_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        content_type: Option<String>,
+    ) -> Result<String, StorageError>;
+
+    /// Write one part to staging. Returns the part's MD5-hex ETag.
+    async fn upload_part(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+        part_number: i32,
+        body: impl Stream<Item = std::io::Result<Bytes>> + Send,
+    ) -> Result<String, StorageError>;
+
+    /// Assemble parts (in ascending part-number order) into the final object.
+    /// `parts` contains part numbers only — ETags from the client are ignored (D-08).
+    async fn complete_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        parts: Vec<i32>,
+    ) -> Result<ObjectMeta, StorageError>;
+
+    /// Abort a multipart upload, removing all staged parts.
+    async fn abort_multipart_upload(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+    ) -> Result<(), StorageError>;
 }
