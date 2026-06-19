@@ -90,27 +90,45 @@ async fn write_object_body(
     let (std_file, tmp_path) = tmp
         .keep()
         .map_err(|e| StorageError::Io(std::io::Error::other(e.to_string())))?;
-    let mut file = tokio::fs::File::from_std(std_file);
-    let mut hasher = crate::etag::EtagHasher::new();
-    let mut bytes_written: u64 = 0;
 
-    while let Some(chunk) = body.next().await {
-        let chunk = chunk.map_err(StorageError::Io)?;
-        hasher.update(&chunk);
-        bytes_written += chunk.len() as u64;
-        file.write_all(&chunk).await.map_err(StorageError::Io)?;
+    // After keep() the temp file is persistent (no Drop cleanup), so any error on the
+    // write path must best-effort remove it to avoid leaking invisible temp files into
+    // objects/ that never decode and accumulate forever (WR-06).
+    let write_result = async {
+        let mut file = tokio::fs::File::from_std(std_file);
+        let mut hasher = crate::etag::EtagHasher::new();
+        let mut bytes_written: u64 = 0;
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(StorageError::Io)?;
+            hasher.update(&chunk);
+            bytes_written += chunk.len() as u64;
+            file.write_all(&chunk).await.map_err(StorageError::Io)?;
+        }
+        file.flush().await.map_err(StorageError::Io)?;
+        drop(file);
+        Ok::<(String, u64), StorageError>((hasher.finalize(), bytes_written))
     }
-    file.flush().await.map_err(StorageError::Io)?;
-    drop(file);
+    .await;
 
-    let etag = hasher.finalize();
+    let (etag, bytes_written) = match write_result {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(e);
+        }
+    };
+
     let target = objects_dir.join(encoded_key);
 
     // rename(2) can block under filesystem pressure — run on the blocking thread pool (D-04, D-08).
-    tokio::task::spawn_blocking(move || std::fs::rename(&tmp_path, &target))
+    let tmp_for_rename = tmp_path.clone();
+    let rename = tokio::task::spawn_blocking(move || std::fs::rename(&tmp_for_rename, &target))
         .await
-        .map_err(|_| StorageError::Io(std::io::Error::other("spawn_blocking join error")))?
-        .map_err(StorageError::Io)?;
+        .map_err(|_| StorageError::Io(std::io::Error::other("spawn_blocking join error")))?;
+    if let Err(e) = rename {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(StorageError::Io(e));
+    }
 
     Ok((etag, bytes_written))
 }
@@ -729,6 +747,29 @@ mod tests {
             Err(StorageError::InvalidKey) => {}
             other => panic!("expected InvalidKey for key '..', got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn put_object_stream_error_leaves_no_temp_files() {
+        // WR-06 regression: a body stream that errors mid-write must not leak a
+        // persistent temp file into objects/.
+        let (_dir, storage) = make_storage_with_bucket().await;
+        let err_body = stream::iter(vec![
+            Ok(Bytes::from_static(b"partial")),
+            Err(std::io::Error::other("boom")),
+        ]);
+        let res = storage
+            .put_object("test-bucket", "broken.bin", err_body, None)
+            .await;
+        assert!(res.is_err(), "stream error must propagate");
+
+        let objects_dir = storage.objects_dir("test-bucket");
+        let entries: Vec<_> = std::fs::read_dir(&objects_dir).unwrap().flatten().collect();
+        assert!(
+            entries.is_empty(),
+            "no temp files must remain after a failed put, found: {:?}",
+            entries.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
