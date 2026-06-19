@@ -159,15 +159,21 @@ impl S3 for FerrobucketS3 {
                 .and_then(|r| s3_range_to_byte_range(r).resolve(full_size));
 
             if let Some(resolved) = window {
-                let start = resolved.start;
-                // end is inclusive last byte.
-                let end = resolved.start + resolved.length.saturating_sub(1);
-                output.content_range = Some(format!("bytes {start}-{end}/{full_size}"));
-                output.content_length = Some(resolved.length as i64);
-                return Ok(S3Response::with_status(output, StatusCode::PARTIAL_CONTENT));
+                // A zero-length window (e.g. a suffix range on a zero-length object, where
+                // resolve() returns Some({start:0, length:0})) has no satisfiable bytes:
+                // fall through to a 200 with the full (empty) body rather than emitting a
+                // malformed "206 Content-Range: bytes 0-0/0" (RFC 9110 incorrect). WR-01.
+                if resolved.length > 0 {
+                    let start = resolved.start;
+                    // end is inclusive last byte.
+                    let end = resolved.start + resolved.length.saturating_sub(1);
+                    output.content_range = Some(format!("bytes {start}-{end}/{full_size}"));
+                    output.content_length = Some(resolved.length as i64);
+                    return Ok(S3Response::with_status(output, StatusCode::PARTIAL_CONTENT));
+                }
             }
-            // If window is None (e.g. Suffix on zero-length object → zero-length window),
-            // fall through to a 200 response with the full (zero-length) body.
+            // If the range produced no satisfiable window (None, or the zero-length case
+            // above), fall through to a 200 response with the full (possibly empty) body.
         }
 
         Ok(S3Response::new(output))

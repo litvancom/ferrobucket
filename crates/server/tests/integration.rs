@@ -636,6 +636,53 @@ async fn test_ranged_get() {
     handle.abort();
 }
 
+/// WR-01 regression: a suffix range (`bytes=-N`) on a zero-length object must NOT emit a
+/// malformed `206 Content-Range: bytes 0-0/0`. The empty object has no satisfiable bytes,
+/// so the server falls through to a `200` with an empty body (RFC 9110).
+#[tokio::test]
+async fn test_suffix_range_on_empty_object() {
+    let (handle, addr, _dir) = start_server(false).await;
+    let client = Client::new();
+
+    create_bucket(&client, addr, "empty-range-bucket").await;
+
+    // PUT a zero-length object.
+    put_object(
+        &client,
+        addr,
+        "empty-range-bucket",
+        "empty.bin",
+        vec![],
+        "application/octet-stream",
+    )
+    .await;
+
+    // GET with a suffix range on the empty object → must be 200, not a malformed 206.
+    let resp = get_object(
+        &client,
+        addr,
+        "empty-range-bucket",
+        "empty.bin",
+        Some("bytes=-200"),
+    )
+    .await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "suffix range on a zero-length object must return 200, got {}",
+        resp.status()
+    );
+    assert!(
+        resp.headers().get("content-range").is_none(),
+        "zero-length object must not carry a Content-Range header (got {:?})",
+        resp.headers().get("content-range")
+    );
+    let body_bytes = resp.bytes().await.expect("empty body");
+    assert_eq!(body_bytes.len(), 0, "empty object body must be 0 bytes");
+
+    handle.abort();
+}
+
 /// DeleteObjects: two real keys + one never-created; all three appear in Deleted[].
 /// Then ListObjectsV2 shows bucket empty of those keys (D-05 idempotency).
 #[tokio::test]
