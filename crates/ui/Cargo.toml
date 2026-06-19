@@ -1,0 +1,4 @@
+[package]
+name = "ferrobucket-ui"
+version = "0.1.0"
+edition.workspace = true
