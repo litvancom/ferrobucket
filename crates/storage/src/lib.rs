@@ -8,12 +8,14 @@ pub mod etag;
 pub mod fs;
 pub mod list;
 pub mod meta;
+pub mod multipart;
 pub mod range;
 
 pub use encode::{decode_key, encode_key};
 pub use fs::FsStorage;
 pub use list::{ListV2Req, ListV2Res};
 pub use meta::{BucketInfo, ObjectMeta};
+pub use multipart::MultipartMeta;
 pub use range::ByteRange;
 
 #[derive(Error, Debug)]
@@ -46,6 +48,12 @@ pub enum StorageError {
     /// lies entirely beyond the object's length (D-04, T-02-01).
     #[error("range not satisfiable")]
     RangeNotSatisfiable,
+
+    #[error("no such upload: {0}")]
+    NoSuchUpload(String),
+
+    #[error("invalid part number: {0}")]
+    InvalidPartNumber(i32),
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
