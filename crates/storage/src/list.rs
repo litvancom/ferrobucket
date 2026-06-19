@@ -230,16 +230,18 @@ mod tests {
         stream::iter(vec![Ok(Bytes::from_static(data))])
     }
 
+    const BUCKET: &str = "test-bkt";
+
     async fn make_storage() -> (tempfile::TempDir, FsStorage) {
         let dir = tempdir().unwrap();
         let storage = FsStorage::new(dir.path());
-        storage.create_bucket("b").await.unwrap();
+        storage.create_bucket(BUCKET).await.unwrap();
         (dir, storage)
     }
 
     async fn put(storage: &FsStorage, key: &str) {
         storage
-            .put_object("b", key, body(b"x"), None)
+            .put_object(BUCKET, key, body(b"x"), None)
             .await
             .unwrap();
     }
@@ -279,7 +281,7 @@ mod tests {
 
         let res = list_objects_v2(
             &storage,
-            "b",
+            BUCKET,
             ListV2Req {
                 prefix: Some("a".to_owned()),
                 ..Default::default()
@@ -303,7 +305,7 @@ mod tests {
 
         let res = list_objects_v2(
             &storage,
-            "b",
+            BUCKET,
             ListV2Req {
                 delimiter: Some("/".to_owned()),
                 ..Default::default()
@@ -327,7 +329,7 @@ mod tests {
             put(&storage, k).await;
         }
 
-        let res = list_objects_v2(&storage, "b", ListV2Req::default())
+        let res = list_objects_v2(&storage, BUCKET, ListV2Req::default())
             .await
             .unwrap();
 
@@ -351,7 +353,7 @@ mod tests {
         loop {
             let res = list_objects_v2(
                 &storage,
-                "b",
+                BUCKET,
                 ListV2Req {
                     max_keys: Some(3),
                     continuation_token: token.clone(),
@@ -387,7 +389,7 @@ mod tests {
 
         let res = list_objects_v2(
             &storage,
-            "b",
+            BUCKET,
             ListV2Req {
                 prefix: Some("photos/".to_owned()),
                 delimiter: Some("/".to_owned()),
