@@ -16,6 +16,7 @@ clap          = { version = "4", features = ["derive"] }
 async-trait   = { version = "=0.1.89" }
 bytes         = { version = "1" }
 futures       = { version = "0.3" }
+http-body     = { version = "1" }
 http-body-util = { version = "0.1" }
 time          = { version = "0.3", features = ["serde-human-readable"] }
 anyhow        = "1"
