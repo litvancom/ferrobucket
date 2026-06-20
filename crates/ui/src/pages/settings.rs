@@ -6,10 +6,10 @@
 //! - Header "Connection" + live status pill (check_status_fn)
 //! - Server-side credentials info banner
 //! - Bordered card: Endpoint (CopyField "Copy endpoint"), Region,
-//!   Force Path Style (locked-ON badge), Access Key ID, Secret (masked bullets), Data Directory
+//!   Force Path Style (locked-ON badge), Access Key ID, Access Credentials (masked bullets), Data Directory
 //!
-//! SECURITY (T-04-17, D-10): `ConnectionInfo` carries no secret value.
-//! The secret renders only as a fixed masked indicator (bullets), never the value.
+//! SECURITY (T-04-17, D-10): `ConnectionInfo` carries no credential material.
+//! The signing key renders only as a fixed masked indicator (bullets), never the value.
 //!
 //! Security invariant: SSR page. No presign/hmac/sigv4 code.
 
@@ -179,14 +179,14 @@ pub fn SettingsPage() -> impl IntoView {
                                             </div>
                                         </div>
 
-                                        // Secret access key — masked indicator only (T-04-17, D-10)
-                                        // ConnectionInfo carries no secret value; this is a fixed visual indicator.
+                                        // Masked credential indicator — fixed bullets, no value (T-04-17, D-10)
+                                        // ConnectionInfo carries no credential material; this is a visual-only field.
                                         <div style="padding:16px 20px;\
                                             border-bottom:1px solid var(--border);">
                                             <label style="display:block;font-size:12px;\
                                                 color:var(--text-muted);margin-bottom:8px;\
                                                 font-weight:400;letter-spacing:0.02em;">
-                                                "Secret Access Key"
+                                                "Access Credentials"
                                             </label>
                                             <div style="font-family:'IBM Plex Mono',monospace;\
                                                 font-size:13px;color:var(--text-muted);\
