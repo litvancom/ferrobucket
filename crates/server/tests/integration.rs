@@ -1058,3 +1058,551 @@ async fn test_aws_cli() {
 
     handle.abort();
 }
+
+// ─── Multipart upload tests (non-ignored) ────────────────────────────────────
+
+/// Parse `<UploadId>...</UploadId>` out of a CreateMultipartUpload XML response body.
+fn parse_upload_id(xml: &str) -> String {
+    // The response XML from s3s looks like:
+    //   <?xml ...><InitiateMultipartUploadResult ...><UploadId>UUID</UploadId>...
+    let tag = "<UploadId>";
+    let end = "</UploadId>";
+    let start = xml.find(tag).expect("UploadId tag not found") + tag.len();
+    let finish = xml[start..].find(end).expect("UploadId end tag not found");
+    xml[start..start + finish].to_owned()
+}
+
+/// In-process multipart round-trip (ROADMAP criterion 2 correctness, CI-green):
+///   CreateMultipartUpload → UploadPart×2 → CompleteMultipartUpload → GetObject
+///
+/// Verifies:
+/// - The assembled body exactly equals block1 ++ block2.
+/// - The ETag matches the `<md5hex>-2` pattern (D-07).
+///
+/// Uses `start_server(false)` (credentialed) and header-based SigV4 via `signed_request`.
+#[tokio::test]
+async fn test_multipart_roundtrip() {
+    let (handle, addr, _dir) = start_server(false).await;
+    let client = Client::new();
+
+    // Create bucket.
+    let resp = create_bucket(&client, addr, "mp-bucket").await;
+    assert!(resp.status().is_success(), "create_bucket: {}", resp.status());
+
+    let bucket = "mp-bucket";
+    let key = "assembled.bin";
+    let base = format!("http://{}/{}/{}", addr, bucket, key);
+
+    // ── CreateMultipartUpload: POST /<bucket>/<key>?uploads ──────────────────
+    let create_url = format!("{}?uploads", base);
+    let resp = signed_request(
+        &client,
+        Method::POST,
+        &create_url,
+        vec![],
+        "",
+        &[],
+        ACCESS_KEY,
+        SECRET_KEY,
+    )
+    .await
+    .send()
+    .await
+    .expect("CreateMultipartUpload send");
+    assert!(
+        resp.status().is_success(),
+        "CreateMultipartUpload failed: {}",
+        resp.status()
+    );
+    let xml = resp.text().await.expect("CreateMultipartUpload body");
+    let upload_id = parse_upload_id(&xml);
+
+    // ── UploadPart 1: PUT /<bucket>/<key>?partNumber=1&uploadId=<id> ─────────
+    let block1: Vec<u8> = b"hello from part one ".to_vec();
+    let part1_url = format!("{}?partNumber=1&uploadId={}", base, upload_id);
+    let resp = signed_request(
+        &client,
+        Method::PUT,
+        &part1_url,
+        block1.clone(),
+        "application/octet-stream",
+        &[],
+        ACCESS_KEY,
+        SECRET_KEY,
+    )
+    .await
+    .send()
+    .await
+    .expect("UploadPart 1 send");
+    assert_eq!(resp.status(), 200, "UploadPart 1 failed: {}", resp.status());
+    // Extract ETag from response header (needed for CompleteMultipartUpload body).
+    let etag1 = resp
+        .headers()
+        .get("etag")
+        .expect("UploadPart 1 etag header missing")
+        .to_str()
+        .unwrap()
+        .trim_matches('"')
+        .to_owned();
+
+    // ── UploadPart 2: PUT /<bucket>/<key>?partNumber=2&uploadId=<id> ─────────
+    let block2: Vec<u8> = b"and part two!".to_vec();
+    let part2_url = format!("{}?partNumber=2&uploadId={}", base, upload_id);
+    let resp = signed_request(
+        &client,
+        Method::PUT,
+        &part2_url,
+        block2.clone(),
+        "application/octet-stream",
+        &[],
+        ACCESS_KEY,
+        SECRET_KEY,
+    )
+    .await
+    .send()
+    .await
+    .expect("UploadPart 2 send");
+    assert_eq!(resp.status(), 200, "UploadPart 2 failed: {}", resp.status());
+    let etag2 = resp
+        .headers()
+        .get("etag")
+        .expect("UploadPart 2 etag header missing")
+        .to_str()
+        .unwrap()
+        .trim_matches('"')
+        .to_owned();
+
+    // ── CompleteMultipartUpload: POST /<bucket>/<key>?uploadId=<id> ──────────
+    // The server ignores echoed ETags per D-08, but a real S3 client always sends them.
+    let complete_body = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"{etag1}"</ETag></Part><Part><PartNumber>2</PartNumber><ETag>"{etag2}"</ETag></Part></CompleteMultipartUpload>"#,
+    )
+    .into_bytes();
+    let complete_url = format!("{}?uploadId={}", base, upload_id);
+    let body_len = complete_body.len().to_string();
+    let resp = signed_request(
+        &client,
+        Method::POST,
+        &complete_url,
+        complete_body,
+        "application/xml",
+        &[("content-length", &body_len)],
+        ACCESS_KEY,
+        SECRET_KEY,
+    )
+    .await
+    .send()
+    .await
+    .expect("CompleteMultipartUpload send");
+    assert!(
+        resp.status().is_success(),
+        "CompleteMultipartUpload failed: {}",
+        resp.status()
+    );
+
+    // ── GetObject: verify assembled body and ETag ─────────────────────────────
+    let resp = get_object(&client, addr, bucket, key, None).await;
+    assert_eq!(resp.status(), 200, "GetObject failed: {}", resp.status());
+
+    let assembled_etag = resp
+        .headers()
+        .get("etag")
+        .expect("GetObject etag header missing")
+        .to_str()
+        .unwrap()
+        .to_owned();
+
+    let body_bytes = resp.bytes().await.expect("GetObject body");
+
+    // Body must equal block1 ++ block2 exactly.
+    let mut expected = block1.clone();
+    expected.extend_from_slice(&block2);
+    assert_eq!(
+        body_bytes.as_ref(),
+        expected.as_slice(),
+        "Assembled body mismatch: expected {} bytes, got {}",
+        expected.len(),
+        body_bytes.len()
+    );
+
+    // ETag must match `<md5hex>-2` pattern (D-07 assembled ETag shape).
+    let etag_str = assembled_etag.trim_matches('"');
+    assert!(
+        etag_str.len() >= 34 // 32 hex + dash + digit
+            && etag_str.ends_with("-2")
+            && etag_str[..32].chars().all(|c| c.is_ascii_hexdigit()),
+        "Assembled ETag must match ^[0-9a-f]{{32}}-2$, got: {etag_str}"
+    );
+
+    handle.abort();
+}
+
+/// Abort cleans staging: verify that after AbortMultipartUpload the object
+/// does not exist (wire-level ROADMAP criterion 2 proof).
+///
+/// Uses `start_server(false)` (credentialed).
+#[tokio::test]
+async fn test_abort_cleans_staging() {
+    let (handle, addr, _dir) = start_server(false).await;
+    let client = Client::new();
+
+    create_bucket(&client, addr, "abort-bucket").await;
+
+    let bucket = "abort-bucket";
+    let key = "abort-key.bin";
+    let base = format!("http://{}/{}/{}", addr, bucket, key);
+
+    // CreateMultipartUpload.
+    let create_url = format!("{}?uploads", base);
+    let resp = signed_request(
+        &client,
+        Method::POST,
+        &create_url,
+        vec![],
+        "",
+        &[],
+        ACCESS_KEY,
+        SECRET_KEY,
+    )
+    .await
+    .send()
+    .await
+    .expect("CreateMultipartUpload send");
+    assert!(resp.status().is_success(), "CreateMultipartUpload: {}", resp.status());
+    let xml = resp.text().await.expect("body");
+    let upload_id = parse_upload_id(&xml);
+
+    // UploadPart 1.
+    let part_url = format!("{}?partNumber=1&uploadId={}", base, upload_id);
+    let resp = signed_request(
+        &client,
+        Method::PUT,
+        &part_url,
+        b"partial data".to_vec(),
+        "application/octet-stream",
+        &[],
+        ACCESS_KEY,
+        SECRET_KEY,
+    )
+    .await
+    .send()
+    .await
+    .expect("UploadPart send");
+    assert_eq!(resp.status(), 200, "UploadPart: {}", resp.status());
+
+    // AbortMultipartUpload: DELETE /<bucket>/<key>?uploadId=<id>
+    let abort_url = format!("{}?uploadId={}", base, upload_id);
+    let resp = signed_request(
+        &client,
+        Method::DELETE,
+        &abort_url,
+        vec![],
+        "",
+        &[],
+        ACCESS_KEY,
+        SECRET_KEY,
+    )
+    .await
+    .send()
+    .await
+    .expect("AbortMultipartUpload send");
+    assert!(
+        resp.status().is_success() || resp.status() == 204,
+        "AbortMultipartUpload must be 2xx/204, got: {}",
+        resp.status()
+    );
+
+    // GET the object key — must be 404 / NoSuchKey (no completed object was written).
+    let get_resp = get_object(&client, addr, bucket, key, None).await;
+    assert_eq!(
+        get_resp.status(),
+        404,
+        "After AbortMultipartUpload the object must not exist (expected 404, got {})",
+        get_resp.status()
+    );
+
+    handle.abort();
+}
+
+/// Expired presigned URL returns 403.
+///
+/// Pitfall 2: presigned URL verification requires `start_server(false)` (SimpleAuth);
+/// anonymous mode returns 501 NotImplemented for presigned requests.
+///
+/// Steps:
+/// 1. Start a credentialed server.
+/// 2. PUT a real object so there is something to GET.
+/// 3. Generate a presigned GET URL with expires_secs = 1.
+/// 4. Sleep > 1 second.
+/// 5. Fetch via plain reqwest (no extra signing — the URL is self-authenticating).
+/// 6. Assert HTTP 403.
+#[tokio::test]
+async fn test_presigned_url_expired() {
+    let (handle, addr, _dir) = start_server(false).await;
+    let client = Client::new();
+
+    // Create bucket and PUT an object.
+    create_bucket(&client, addr, "exp-bucket").await;
+    let put_resp = put_object(
+        &client,
+        addr,
+        "exp-bucket",
+        "secret.txt",
+        b"secret data".to_vec(),
+        "text/plain",
+    )
+    .await;
+    assert_eq!(put_resp.status(), 200, "PUT setup failed: {}", put_resp.status());
+
+    // Generate a presigned GET URL with a 1-second TTL.
+    // PITFALL 2: must use start_server(false) (credentialed); anonymous mode returns 501.
+    let host = addr.to_string();
+    let url = ferrobucket_server::presign::presign_url(
+        "GET",
+        &host,
+        "/exp-bucket/secret.txt",
+        1, // expires_secs = 1 second
+        ACCESS_KEY,
+        SECRET_KEY,
+        REGION,
+    );
+
+    // Sleep just over 1 second so the URL expires.
+    tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
+
+    // Fetch without extra signing — the presigned URL is self-authenticating.
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .expect("presigned GET send");
+
+    assert_eq!(
+        resp.status(),
+        403,
+        "Expired presigned URL must return 403, got {} (T-03-13: expiry enforcement)",
+        resp.status()
+    );
+
+    handle.abort();
+}
+
+// ─── Gated tests (require external binaries) ─────────────────────────────────
+
+/// Presigned PUT + GET round-trip via real `curl` (ROADMAP criterion 3).
+///
+/// Skipped when `curl` is not on $PATH so that `cargo test -p ferrobucket-server`
+/// is always green in CI without external binaries.
+///
+/// To run explicitly:
+///   cargo test -p ferrobucket-server -- --ignored test_presigned_curl_roundtrip
+#[tokio::test]
+#[ignore]
+async fn test_presigned_curl_roundtrip() {
+    // Skip-if-absent guard.
+    if tokio::process::Command::new("curl")
+        .arg("--version")
+        .output()
+        .await
+        .is_err()
+    {
+        eprintln!("curl not installed; skipping test_presigned_curl_roundtrip");
+        return;
+    }
+
+    // Pitfall 2: presigned URLs require a credentialed server (start_server(false)).
+    let (handle, addr, _dir) = start_server(false).await;
+    let client = Client::new();
+    let host = addr.to_string();
+
+    // Create bucket.
+    create_bucket(&client, addr, "presign-curl-bucket").await;
+
+    let bucket = "presign-curl-bucket";
+    let key = "round-trip.bin";
+    let test_bytes: Vec<u8> = b"presigned curl round-trip test payload".to_vec();
+
+    // ── Presigned PUT ─────────────────────────────────────────────────────────
+    // Pitfall 5: presign_url signs only `host` — no content-type in SignedHeaders.
+    // curl therefore needs no special Content-Type header.
+    let put_url = ferrobucket_server::presign::presign_url(
+        "PUT",
+        &host,
+        &format!("/{}/{}", bucket, key),
+        900,
+        ACCESS_KEY,
+        SECRET_KEY,
+        REGION,
+    );
+
+    // Write test bytes to a NamedTempFile for curl to read.
+    let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+    std::fs::write(tmp.path(), &test_bytes).expect("write tempfile");
+    let tmp_path = tmp.path().to_str().unwrap().to_owned();
+
+    // Run: curl -s -o /dev/null -w "%{http_code}" -X PUT --data-binary @<file> "<url>"
+    let put_out = tokio::process::Command::new("curl")
+        .args([
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "-X",
+            "PUT",
+            "--data-binary",
+            &format!("@{}", tmp_path),
+            &put_url,
+        ])
+        .output()
+        .await
+        .expect("curl PUT subprocess");
+
+    let put_status_str = String::from_utf8_lossy(&put_out.stdout);
+    let put_status: u16 = put_status_str
+        .trim()
+        .parse()
+        .expect("curl PUT status code parse");
+    assert_eq!(
+        put_status, 200,
+        "Presigned PUT via curl must return 200, got {} (stdout: {}, stderr: {})",
+        put_status,
+        put_status_str,
+        String::from_utf8_lossy(&put_out.stderr)
+    );
+
+    // ── Presigned GET ─────────────────────────────────────────────────────────
+    let get_url = ferrobucket_server::presign::presign_url(
+        "GET",
+        &host,
+        &format!("/{}/{}", bucket, key),
+        900,
+        ACCESS_KEY,
+        SECRET_KEY,
+        REGION,
+    );
+
+    // Run: curl -s "<url>" — stdout is the raw body bytes.
+    let get_out = tokio::process::Command::new("curl")
+        .args(["-s", &get_url])
+        .output()
+        .await
+        .expect("curl GET subprocess");
+
+    assert!(
+        get_out.status.success(),
+        "curl GET process failed: {}",
+        String::from_utf8_lossy(&get_out.stderr)
+    );
+    assert_eq!(
+        get_out.stdout, test_bytes,
+        "Presigned GET body must equal the uploaded bytes"
+    );
+
+    handle.abort();
+}
+
+/// Gated aws s3 cp multipart test (ROADMAP criterion 1).
+///
+/// Uploads an >= 8MB file via `aws s3 cp` (which triggers real multipart upload
+/// at the default 8MB threshold — Pitfall 6), downloads it, and verifies the
+/// downloaded bytes match the original exactly.
+///
+/// Skipped when `aws` CLI is not on $PATH so that `cargo test -p ferrobucket-server`
+/// is always green in CI without the CLI.
+///
+/// To run explicitly:
+///   cargo test -p ferrobucket-server -- --ignored test_aws_cli_multipart
+#[tokio::test]
+#[ignore]
+async fn test_aws_cli_multipart() {
+    // Skip-if-absent guard (same pattern as test_aws_cli).
+    if std::process::Command::new("aws")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("aws CLI not installed; skipping test_aws_cli_multipart");
+        return;
+    }
+
+    let (handle, addr, _dir) = start_server(false).await;
+
+    // Shared aws CLI runner — same as test_aws_cli.
+    async fn run_aws_mp(
+        args: &[&str],
+        addr: SocketAddr,
+    ) -> (std::process::ExitStatus, Vec<u8>, Vec<u8>) {
+        let mut cmd = tokio::process::Command::new("aws");
+        cmd.args(args)
+            .arg("--endpoint-url")
+            .arg(format!("http://{}", addr))
+            .env("AWS_ACCESS_KEY_ID", ACCESS_KEY)
+            .env("AWS_SECRET_ACCESS_KEY", SECRET_KEY)
+            .env("AWS_REGION", REGION)
+            .env("AWS_EC2_METADATA_DISABLED", "true");
+        let out = cmd.output().await.expect("aws subprocess");
+        (out.status, out.stdout, out.stderr)
+    }
+
+    // Create bucket.
+    let (status, _out, err) =
+        run_aws_mp(&["s3", "mb", "s3://mp-cli-test"], addr).await;
+    assert!(
+        status.success(),
+        "aws s3 mb failed:\n{}",
+        String::from_utf8_lossy(&err)
+    );
+
+    // Write a >= 8MB file.
+    // PITFALL 6: aws s3 cp uses multipart only for files > 8MB (default threshold).
+    // Files < 8MB go through PutObject and would NOT prove multipart.
+    const FILE_SIZE: usize = 9 * 1024 * 1024; // 9 MiB — safely above 8MB threshold
+    let src_tmp = tempfile::NamedTempFile::new().expect("tempfile");
+    // Use a repeating pattern so the checksum is deterministic.
+    let pattern: Vec<u8> = (0u8..=255).cycle().take(FILE_SIZE).collect();
+    std::fs::write(src_tmp.path(), &pattern).expect("write 9MB tempfile");
+    let src_path = src_tmp.path().to_str().unwrap().to_owned();
+
+    // aws s3 cp <file> s3://mp-cli-test/big.bin — triggers CreateMultipartUpload + UploadParts + Complete.
+    let (status, _out, err) = run_aws_mp(
+        &["s3", "cp", &src_path, "s3://mp-cli-test/big.bin"],
+        addr,
+    )
+    .await;
+    assert!(
+        status.success(),
+        "aws s3 cp (upload 9MB) failed:\n{}",
+        String::from_utf8_lossy(&err)
+    );
+
+    // Download the object.
+    let down_tmp = tempfile::NamedTempFile::new().expect("download tempfile");
+    let down_path = down_tmp.path().to_str().unwrap().to_owned();
+    let (status, _out, err) = run_aws_mp(
+        &["s3", "cp", "s3://mp-cli-test/big.bin", &down_path],
+        addr,
+    )
+    .await;
+    assert!(
+        status.success(),
+        "aws s3 cp (download) failed:\n{}",
+        String::from_utf8_lossy(&err)
+    );
+
+    // Verify downloaded bytes match the original exactly (checksum equality).
+    let downloaded = std::fs::read(&down_path).expect("read downloaded file");
+    assert_eq!(
+        downloaded.len(),
+        pattern.len(),
+        "Downloaded file size mismatch: expected {} bytes, got {}",
+        pattern.len(),
+        downloaded.len()
+    );
+    assert_eq!(
+        downloaded, pattern,
+        "Downloaded file content does not match the uploaded 9MB file"
+    );
+
+    handle.abort();
+}
