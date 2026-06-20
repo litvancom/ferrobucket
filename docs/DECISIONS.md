@@ -354,3 +354,39 @@ output-name = "ferrobucket-ui"
 No blocker. No fallback name was chosen (D-05). No placeholder crate was published or reserved (D-05).
 
 **Note:** Initial crates.io query without a `User-Agent` header returned a policy-violation error (`"We are unable to process your request at this time"`). A second query with a descriptive `User-Agent` header returned the definitive `"crate \`ferrobucket\` does not exist"` response confirming availability.
+
+---
+
+## 5. Phase 4 — Web UI design decisions (2026-06-20)
+
+Recorded after a live browser verification failure + a provided design export. Source: user
+sign-off via `/gsd-execute-phase 4` checkpoint; design at `.ai/Design decisions requested/S3 Browser.dc.html`.
+
+### 5.1 DEC-ui-theme-default — LIGHT is the default theme (reverses prior "dark default")
+
+The original Phase-4 contract and ROADMAP criterion 4 specified **dark** as the default theme.
+The provided design seeds **light** as the default, and the user confirmed light should be the
+product default. Decision: **light is the default.** `:root` holds the light palette;
+`[data-theme="dark"]` holds the dark override; the theme toggle sets/removes `data-theme="dark"`
+and persists in `localStorage` (no stored value ⇒ light). ROADMAP criterion-4 wording and the
+theme-toggle island default both invert. Supersedes the earlier dark-default statement.
+
+### 5.2 D-10 reaffirmed — Settings is READ-ONLY (design's editable settings NOT adopted)
+
+The design export shows the Settings/Connection screen with **editable** Endpoint/Region inputs,
+a Force-Path-Style toggle, and "Test connection"/"Save configuration" buttons. **D-10 (LOCKED)
+remains in force: settings is read-only.** The design's visual layout/labels/spacing are adopted,
+but rendered as read-only display only — no editable inputs, no Save, no Test; Force-Path-Style
+shown as a locked-ON badge; credentials stay server-side (secret never sent to the browser).
+Rationale: persisting/applying endpoint/region/path-style at runtime is out-of-scope backend work
+and contradicts the locked read-only-settings decision; the user chose to honor D-10. Revisit only
+with an explicit new decision and the backend work to support it.
+
+### 5.3 Full rebuild to the design (gap closure)
+
+The first Phase-4 build failed browser verification (criteria 1/2/3 — see `04-VERIFICATION.md`,
+GAP-04-01: cross-island signal coordination is unsupported in Leptos islands mode). The phase is
+rebuilt to `S3 Browser.dc.html`. Implementation constraint: coordinated interactions must live in
+a **single island** or use a **shared client store reachable from islands** — never a
+`WriteSignal` shared via `use_context` across two separate `#[island]`s. Re-verification must
+include a live browser run.
