@@ -297,6 +297,95 @@ impl S3 for FerrobucketS3 {
         }
     }
 
+    // ── CreateMultipartUpload ─────────────────────────────────────────────────
+
+    async fn create_multipart_upload(
+        &self,
+        req: S3Request<CreateMultipartUploadInput>,
+    ) -> S3Result<S3Response<CreateMultipartUploadOutput>> {
+        let CreateMultipartUploadInput { bucket, key, content_type, .. } = req.input;
+        let upload_id = self
+            .storage
+            .create_multipart_upload(&bucket, &key, content_type)
+            .await
+            .map_err(map_storage_err)?;
+        let output = CreateMultipartUploadOutput {
+            bucket: Some(bucket),
+            key: Some(key),
+            upload_id: Some(upload_id),
+            ..Default::default()
+        };
+        Ok(S3Response::new(output))
+    }
+
+    // ── UploadPart ────────────────────────────────────────────────────────────
+
+    async fn upload_part(
+        &self,
+        req: S3Request<UploadPartInput>,
+    ) -> S3Result<S3Response<UploadPartOutput>> {
+        let UploadPartInput { bucket, upload_id, part_number, body, .. } = req.input;
+        let blob = body.ok_or_else(|| s3_error!(InvalidRequest, "missing body"))?;
+        let stream = body_to_stream(blob);
+        let etag = self
+            .storage
+            .upload_part(&bucket, &upload_id, part_number, stream)
+            .await
+            .map_err(map_storage_err)?;
+        let output = UploadPartOutput {
+            e_tag: Some(ETag::Strong(etag)),
+            ..Default::default()
+        };
+        Ok(S3Response::new(output))
+    }
+
+    // ── CompleteMultipartUpload ───────────────────────────────────────────────
+
+    async fn complete_multipart_upload(
+        &self,
+        req: S3Request<CompleteMultipartUploadInput>,
+    ) -> S3Result<S3Response<CompleteMultipartUploadOutput>> {
+        let CompleteMultipartUploadInput { bucket, key, upload_id, multipart_upload, .. } = req.input;
+        // D-08: extract part NUMBERS only; the client-echoed e_tag on each CompletedPart is
+        // intentionally ignored — assembly correctness relies only on the part numbers.
+        let parts: Vec<i32> = multipart_upload
+            .and_then(|m| m.parts)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|p| p.part_number)
+            .collect();
+        let meta = self
+            .storage
+            .complete_multipart_upload(&bucket, &key, &upload_id, parts)
+            .await
+            .map_err(map_storage_err)?;
+        // CompleteMultipartUploadOutput has a `future: Option<BoxFuture>` field with a manual
+        // Default impl (not derive) — use `..Default::default()` which sets future: None.
+        // Do NOT attempt to clone this Output (Pitfall 1 from RESEARCH.md).
+        let output = CompleteMultipartUploadOutput {
+            bucket: Some(bucket.clone()),
+            key: Some(key.clone()),
+            e_tag: Some(ETag::Strong(meta.etag)),
+            location: Some(format!("/{}/{}", bucket, key)),
+            ..Default::default()
+        };
+        Ok(S3Response::new(output))
+    }
+
+    // ── AbortMultipartUpload ──────────────────────────────────────────────────
+
+    async fn abort_multipart_upload(
+        &self,
+        req: S3Request<AbortMultipartUploadInput>,
+    ) -> S3Result<S3Response<AbortMultipartUploadOutput>> {
+        let AbortMultipartUploadInput { bucket, upload_id, .. } = req.input;
+        self.storage
+            .abort_multipart_upload(&bucket, &upload_id)
+            .await
+            .map_err(map_storage_err)?;
+        Ok(S3Response::new(AbortMultipartUploadOutput::default()))
+    }
+
     // ── ListObjectsV2 ─────────────────────────────────────────────────────────
 
     async fn list_objects_v2(
