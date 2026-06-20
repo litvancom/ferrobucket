@@ -9,6 +9,7 @@
 pub mod confirm_modal;
 pub mod copy_button;
 pub mod create_bucket_modal;
+pub mod sidebar_status;
 pub mod slide_over;
 pub mod theme_toggle;
 pub mod toast;
@@ -18,6 +19,7 @@ pub mod upload_zone;
 pub use confirm_modal::{ConfirmAction, ConfirmModal};
 pub use copy_button::CopyButton;
 pub use create_bucket_modal::CreateBucketModal;
+pub use sidebar_status::SidebarStatus;
 pub use slide_over::SlideOver;
 pub use theme_toggle::ThemeToggle;
 pub use toast::{Toast, ToastKind};

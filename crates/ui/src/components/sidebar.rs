@@ -1,28 +1,27 @@
 //! Sidebar SSR component — 220px fixed navigation panel.
 //!
 //! Renders: app name, bucket nav list (active bucket = accent left border),
-//! settings link, ThemeToggle island, and StatusIndicator.
+//! settings link, ThemeToggle island, and SidebarStatus island.
 //!
 //! Security invariant: no presign/hmac/secret/sigv4 code. SSR-only.
 
 use leptos::prelude::*;
 
-use crate::islands::ThemeToggle;
-use crate::components::status_indicator::StatusIndicator;
+use crate::islands::{SidebarStatus, ThemeToggle};
 
 /// Sidebar component (SSR only).
 ///
 /// Props:
 /// - `buckets`: list of bucket names for the nav list.
 /// - `active_bucket`: currently active bucket (accent highlight).
-/// - `status_writable`: live status from check_status_fn (None = unknown).
-/// - `status_message`: status copy string.
+///
+/// The sidebar status is resolved via the `SidebarStatus` hydrated island,
+/// which calls `check_status_fn` client-side. This fixes GAP-04-05 where the
+/// previous static `StatusIndicator` prop never called the server fn.
 #[component]
 pub fn Sidebar(
     #[prop(default = Vec::new())] buckets: Vec<String>,
     #[prop(default = String::new())] active_bucket: String,
-    #[prop(default = true)] status_writable: bool,
-    #[prop(default = "Checking status…".to_string())] status_message: String,
 ) -> impl IntoView {
     let active = StoredValue::new(active_bucket);
 
@@ -125,12 +124,9 @@ pub fn Sidebar(
                     <ThemeToggle />
                 </div>
 
-                // Status indicator
+                // Status indicator island (hydrated, calls check_status_fn — fixes GAP-04-05)
                 <div style="padding:8px 16px 4px;">
-                    <StatusIndicator
-                        writable=status_writable
-                        message=status_message
-                    />
+                    <SidebarStatus />
                 </div>
             </div>
         </nav>
