@@ -1,8 +1,8 @@
 //! CopyButton island — writes a string to the Clipboard API.
 //!
-//! Per UI-SPEC Copywriting Contract: "Presigned URL copied (expires in 15 min)".
-//! The presigned URL string arrives as a server-minted prop (never generated
-//! inside this island — DEC-ui-ssr / D-05).
+//! The copy-label and copied-feedback text are caller-supplied props so the
+//! button can be reused for any field (endpoint copy, presigned URL copy, etc.).
+//! No label text is hardcoded; callers supply both `copy_label` and `copied_label`.
 //!
 //! Security invariant: no presign/hmac/secret/sigv4 code. No credentials in this island.
 //! The only signed artifact that reaches the browser is a URL String from the server fn.
@@ -12,11 +12,19 @@ use leptos::prelude::*;
 /// CopyButton island.
 ///
 /// Props (all serializable):
-/// - `text`: the string to copy to clipboard (a presigned URL from the server).
+/// - `text`:         the string to copy to clipboard.
+/// - `copy_label`:   button label shown before copy (e.g. "Copy endpoint").
+/// - `copied_label`: feedback text shown after copy (e.g. "Endpoint copied").
 #[island]
-pub fn CopyButton(text: String) -> impl IntoView {
+pub fn CopyButton(
+    text: String,
+    copy_label: String,
+    copied_label: String,
+) -> impl IntoView {
     let (copied, set_copied) = signal(false);
     let text = StoredValue::new(text);
+    let copy_label = StoredValue::new(copy_label);
+    let copied_label = StoredValue::new(copied_label);
 
     let handle_copy = move |_| {
         #[cfg(feature = "hydrate")]
@@ -42,6 +50,7 @@ pub fn CopyButton(text: String) -> impl IntoView {
 
     view! {
         <button
+            aria-label=move || copy_label.get_value()
             on:click=handle_copy
             style="background:none;border:1px solid var(--border);\
                 color:var(--text);border-radius:4px;padding:6px 12px;\
@@ -65,9 +74,9 @@ pub fn CopyButton(text: String) -> impl IntoView {
             </svg>
             {move || {
                 if copied.get() {
-                    "Presigned URL copied (expires in 15 min)"
+                    copied_label.get_value()
                 } else {
-                    "Copy Presigned URL"
+                    copy_label.get_value()
                 }
             }}
         </button>

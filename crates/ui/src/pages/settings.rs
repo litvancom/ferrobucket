@@ -53,6 +53,8 @@ pub fn SettingsPage() -> impl IntoView {
                                             <CopyField
                                                 value=info.endpoint.clone()
                                                 label="S3 endpoint URL".to_string()
+                                                copy_label="Copy endpoint".to_string()
+                                                copied_label="Endpoint copied".to_string()
                                             />
                                         </div>
 

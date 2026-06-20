@@ -12,12 +12,16 @@ use crate::islands::CopyButton;
 /// CopyField component (SSR only — CopyButton island is hydrated).
 ///
 /// Props:
-/// - `value`: the text to display and copy.
-/// - `label`: accessible label for the field (screen readers).
+/// - `value`:        the text to display and copy.
+/// - `label`:        accessible label for the read-only input (screen readers).
+/// - `copy_label`:   button label shown before copy (default: "Copy").
+/// - `copied_label`: feedback text shown after copy (default: "Copied").
 #[component]
 pub fn CopyField(
     value: String,
     #[prop(default = String::new())] label: String,
+    #[prop(default = "Copy".to_string())] copy_label: String,
+    #[prop(default = "Copied".to_string())] copied_label: String,
 ) -> impl IntoView {
     let copy_value = value.clone();
 
@@ -36,7 +40,11 @@ pub fn CopyField(
                     min-width:0;cursor:text;"
             />
             // CopyButton island (hydrated)
-            <CopyButton text=copy_value />
+            <CopyButton
+                text=copy_value
+                copy_label=copy_label
+                copied_label=copied_label
+            />
         </div>
     }
 }
