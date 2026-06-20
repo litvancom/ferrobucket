@@ -49,28 +49,28 @@ enum Commands {
 #[derive(Args, Debug)]
 struct ServeArgs {
     /// Root directory for stored data.
-    #[arg(long, default_value = "./data")]
+    #[arg(long, default_value = "./data", env = "FERROBUCKET_DATA")]
     data: std::path::PathBuf,
 
     /// Address and port to listen on.
-    #[arg(long, default_value = "127.0.0.1:9000")]
+    #[arg(long, default_value = "127.0.0.1:9000", env = "FERROBUCKET_LISTEN")]
     listen: SocketAddr,
 
     /// AWS access key ID (required unless --anonymous).
-    #[arg(long)]
+    #[arg(long, env = "FERROBUCKET_ACCESS_KEY")]
     access_key: Option<String>,
 
     /// AWS secret access key (required unless --anonymous).
     /// Never logged or printed.
-    #[arg(long)]
+    #[arg(long, env = "FERROBUCKET_SECRET_KEY")]
     secret_key: Option<String>,
 
     /// S3 region reported to clients (any region accepted; D-06).
-    #[arg(long, default_value = "us-east-1")]
+    #[arg(long, default_value = "us-east-1", env = "FERROBUCKET_REGION")]
     region: String,
 
     /// Skip SigV4 authentication entirely (dev/testing only; disables all auth).
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, env = "FERROBUCKET_ANONYMOUS")]
     anonymous: bool,
 }
 
@@ -141,6 +141,40 @@ fn tracing_or_stderr(msg: &str) {
     eprintln!("{msg}");
 }
 
+// ─── Embedded asset module (embed-assets feature only) ───────────────────────
+
+/// Serves cargo-leptos-built frontend assets embedded into the binary at compile time.
+///
+/// Only compiled when the `embed-assets` Cargo feature is active (release build via
+/// `cargo leptos build --release`). The `#[folder]` path is relative to `crates/server/`,
+/// resolving to workspace `target/site/pkg` — the directory cargo-leptos populates during
+/// its frontend compile step (Pitfall 2: relative to crate, not workspace root).
+///
+/// In dev builds (feature absent) the `/pkg` route is handled by `tower_http::ServeDir`
+/// reading from `target/site/pkg` on disk — unchanged from the pre-embedding path.
+#[cfg(feature = "embed-assets")]
+mod embedded {
+    use axum::http::{StatusCode, header};
+    use axum::response::{IntoResponse, Response};
+    use rust_embed::Embed;
+
+    #[derive(Embed)]
+    #[folder = "../../target/site/pkg"]
+    pub struct EmbeddedPkg;
+
+    pub async fn pkg_handler(
+        axum::extract::Path(path): axum::extract::Path<String>,
+    ) -> impl IntoResponse {
+        match EmbeddedPkg::get(&path) {
+            Some(content) => {
+                let mime = mime_guess::from_path(&path).first_or_octet_stream();
+                ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+            }
+            None => (StatusCode::NOT_FOUND, "404 Not Found").into_response(),
+        }
+    }
+}
+
 // ─── Subcommand implementations ───────────────────────────────────────────────
 
 /// Run the S3 HTTP server (original behaviour relocated from `main`).
@@ -177,14 +211,27 @@ async fn run_serve(args: ServeArgs) -> anyhow::Result<()> {
     // they are already serialized to HTTP by s3s.
     let s3_wrapped = axum::error_handling::HandleError::new(s3_service, handle_s3_error);
 
-    // ── Leptos configuration (Open Question 1 resolution) ───────────────────────
-    // `get_configuration(None)` reads from LEPTOS_* env vars set by `cargo leptos`.
-    // For standalone `cargo run` from the workspace root, fall back to reading the
-    // workspace Cargo.toml directly so `site_root` resolves correctly (Pitfall 5).
-    let conf = get_configuration(None)
-        .or_else(|_| get_configuration(Some("Cargo.toml")))
-        .expect("could not load Leptos config (run from workspace root or use `cargo leptos`)");
-    let leptos_options = conf.leptos_options;
+    // ── Leptos configuration (D-03 cfg-gated split) ─────────────────────────────
+    // In embedded mode: build LeptosOptions directly from code — no LEPTOS_* env,
+    // no Cargo.toml, no get_configuration. The binary is self-contained and runs
+    // from any directory (REQ-nfr-single-binary).
+    // In dev mode: preserve the original get_configuration path so `cargo leptos watch`
+    // and `cargo run` from the workspace root continue to work with hot-reload.
+    #[cfg(feature = "embed-assets")]
+    let leptos_options = leptos::config::LeptosOptions::builder()
+        .output_name("ferrobucket-ui")
+        .build();
+
+    #[cfg(not(feature = "embed-assets"))]
+    let leptos_options = {
+        // `get_configuration(None)` reads from LEPTOS_* env vars set by `cargo leptos`.
+        // For standalone `cargo run` from the workspace root, fall back to reading the
+        // workspace Cargo.toml directly so `site_root` resolves correctly (Pitfall 5).
+        get_configuration(None)
+            .or_else(|_| get_configuration(Some("Cargo.toml")))
+            .expect("could not load Leptos config (run from workspace root or use `cargo leptos`)")
+            .leptos_options
+    };
 
     // ── Build AppState ────────────────────────────────────────────────────────────
     let endpoint = format!("http://{}", args.listen);
@@ -202,10 +249,6 @@ async fn run_serve(args: ServeArgs) -> anyhow::Result<()> {
     // ── Leptos route list ─────────────────────────────────────────────────────────
     let routes = generate_route_list(ferrobucket_ui::App);
 
-    // ── /pkg static asset path (Pitfall 5: derive from site_root, not CWD string) ─
-    let pkg_path = format!("{}/pkg", leptos_options.site_root);
-    let pkg_service = ServeDir::new(&pkg_path);
-
     // ── Mount order (D-01, RESEARCH Pattern 1) ───────────────────────────────────
     //
     // Mount-order invariant: Leptos routes + /pkg + /ui handlers MUST appear BEFORE
@@ -214,12 +257,43 @@ async fn run_serve(args: ServeArgs) -> anyhow::Result<()> {
     //
     // Pitfall 1: do NOT use axum::Router::nest("/ui", ...) — the /ui prefix lives
     //            in the Leptos route tree (App's ParentRoute). Nesting creates /ui/ui/.
+    //
+    // /pkg routing: in embed-assets mode assets are served from binary memory via
+    // embedded::pkg_handler; in dev mode ServeDir reads from target/site/pkg on disk.
+
+    #[cfg(feature = "embed-assets")]
+    let app = axum::Router::new()
+        // 1. Upload/download axum handlers (raw streaming — no Leptos involvement)
+        .route("/ui/upload/{bucket}/{*key}", post(ui::upload_handler))
+        .route("/ui/download/{bucket}/{*key}", get(ui::download_handler))
+        // 2. Embedded WASM/JS/CSS assets baked into the binary at compile time (D-01/D-02)
+        .route("/pkg/{*path}", get(embedded::pkg_handler))
+        // 3. Leptos SSR routes — injects AppState as Leptos context for server fns
+        .leptos_routes_with_context(
+            &app_state,
+            routes,
+            {
+                let app_state = app_state.clone();
+                move || provide_context(app_state.clone())
+            },
+            {
+                let leptos_options = leptos_options.clone();
+                move || ferrobucket_ui::shell(leptos_options.clone())
+            },
+        )
+        // 4. S3 fallback — MUST be last; never sees /ui/* or /pkg/* (mount-order invariant D-01)
+        .fallback_service(s3_wrapped)
+        .with_state(app_state);
+
+    // In dev mode (no embed-assets): serve /pkg from disk via ServeDir for hot-reload.
+    // Pitfall 5: derive path from site_root, not a raw CWD string.
+    #[cfg(not(feature = "embed-assets"))]
     let app = axum::Router::new()
         // 1. Upload/download axum handlers (raw streaming — no Leptos involvement)
         .route("/ui/upload/{bucket}/{*key}", post(ui::upload_handler))
         .route("/ui/download/{bucket}/{*key}", get(ui::download_handler))
         // 2. Static WASM/JS/CSS assets built by cargo-leptos at target/site/pkg
-        .nest_service("/pkg", pkg_service)
+        .nest_service("/pkg", ServeDir::new(&format!("{}/pkg", leptos_options.site_root)))
         // 3. Leptos SSR routes — injects AppState as Leptos context for server fns
         //    generate_route_list(App) emits paths starting with /ui (from ParentRoute),
         //    so the S3 fallback never sees /ui/* requests (RESEARCH A2, Pitfall 1).
