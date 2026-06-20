@@ -1,8 +1,9 @@
 //! CreateBucketModal island — bucket name input with server-fn submit.
 //!
-//! On submit calls `create_bucket_fn`. On `Err`, renders the error string inline
-//! below the field. The reserved-name message "This name is reserved by the server.
-//! Choose a different name." flows through verbatim from D-02 / UI-SPEC Copywriting Contract.
+//! On submit calls `create_bucket_fn`. On `Err`, maps the raw error through
+//! `friendly_create_error` before rendering: reserved-name errors become the
+//! UI-SPEC Copywriting Contract sentence "This name is reserved by the server.
+//! Choose a different name."; other errors strip the leaky server-fn prefix.
 //!
 //! `create_bucket_fn` is the server fn from Plan 02; it is callable from islands
 //! because the #[server] macro routes calls over HTTP.
@@ -13,6 +14,25 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::server_fns::buckets::create_bucket_fn;
+
+/// Map a raw `create_bucket_fn` error to user-friendly copy (UI-SPEC Copywriting Contract).
+///
+/// - If the lowercased message contains "reserved" → the exact reserved-name sentence.
+/// - Otherwise → strip the leaky "error running server function:" prefix (and surrounding
+///   whitespace) so internal framework text never reaches the UI.
+fn friendly_create_error(raw: String) -> String {
+    let lower = raw.to_lowercase();
+    if lower.contains("reserved") {
+        "This name is reserved by the server. Choose a different name.".to_string()
+    } else {
+        // Strip the framework prefix if present, then trim whitespace.
+        let stripped = raw
+            .strip_prefix("error running server function:")
+            .map(|s| s.trim())
+            .unwrap_or(raw.trim());
+        stripped.to_string()
+    }
+}
 
 /// CreateBucketModal island.
 ///
@@ -60,8 +80,7 @@ pub fn CreateBucketModal() -> impl IntoView {
                 }
                 Err(e) => {
                     set_loading.set(false);
-                    // Surface the error verbatim (D-02 reserved-name message flows through).
-                    set_error.set(Some(e.to_string()));
+                    set_error.set(Some(friendly_create_error(e.to_string())));
                 }
             }
         });
@@ -119,7 +138,7 @@ pub fn CreateBucketModal() -> impl IntoView {
                                     outline:none;\
                                     transition:border-color 150ms ease;"
                             />
-                            // Inline error (D-02 reserved-name message flows through verbatim)
+                            // Inline error (friendly_create_error maps reserved-name → UI-SPEC copy)
                             <Show when=move || error.get().is_some()>
                                 <p style="margin:6px 0 0 0;font-size:12px;color:var(--destructive);">
                                     {move || error.get().unwrap_or_default()}
