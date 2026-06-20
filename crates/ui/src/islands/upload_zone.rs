@@ -19,30 +19,40 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::islands::upload_panel::{FileEntry, FileEntryName, UploadStatus, next_entry_id};
+use crate::islands::upload_panel::{
+    FileEntry, FileEntryName, ProgressInfo, UploadStatus, next_entry_id,
+};
 
 /// 8 MiB threshold and part size (D-08).
 /// Named clearly: 8 * 1024 * 1024 bytes = 8_388_608 bytes = 8 MiB.
 pub const PART_SIZE_BYTES: u32 = 8 * 1024 * 1024; // 8_388_608
 
-/// UploadZone island.
+/// UploadIsland — a SINGLE `#[island]` that owns the upload zone (drag-drop +
+/// click-to-select) AND the bottom progress panel.
+///
+/// GAP-04-01 fix: the zone and panel were previously two separate islands that
+/// tried to share a `WriteSignal<Vec<(FileEntry, FileEntryName)>>` via
+/// `use_context()`. A `WriteSignal` cannot cross a Leptos island hydration
+/// boundary, so `process_files` always early-returned and no upload ever fired.
+/// Now ONE island owns the entries signal LOCALLY and passes it directly —
+/// the entries write-handle is never shared across an island boundary.
 ///
 /// Props (all serializable — no signals/callbacks as props):
 /// - `bucket`: the target bucket name.
 /// - `prefix`: the current object key prefix.
 #[island]
-pub fn UploadZone(bucket: String, prefix: String) -> impl IntoView {
+pub fn UploadIsland(bucket: String, prefix: String) -> impl IntoView {
     let (drag_over, set_drag_over) = signal(false);
     let bucket = StoredValue::new(bucket);
     let prefix = StoredValue::new(prefix);
 
-    // File list shared via context with UploadPanel.
-    let set_entries: Option<WriteSignal<Vec<(FileEntry, FileEntryName)>>> = use_context();
+    // File list owned LOCALLY (GAP-04-01): never crosses an island boundary.
+    let (entries, set_entries) = signal::<Vec<(FileEntry, FileEntryName)>>(Vec::new());
 
     let process_files = move |file_list: web_sys::FileList| {
         #[cfg(feature = "hydrate")]
         {
-            let Some(se) = set_entries else { return };
+            let se = set_entries;
             let n = file_list.length();
             for i in 0..n {
                 if let Some(file) = file_list.get(i) {
@@ -120,6 +130,7 @@ pub fn UploadZone(bucket: String, prefix: String) -> impl IntoView {
     };
 
     view! {
+        // ── Drop zone ──────────────────────────────────────────────────────────
         <div
             style=move || {
                 let bc = if drag_over.get() { "var(--accent)" } else { "var(--border)" };
@@ -151,6 +162,133 @@ pub fn UploadZone(bucket: String, prefix: String) -> impl IntoView {
                 on:change=on_input
             />
         </div>
+
+        // ── Bottom progress panel (same island; reads the LOCAL entries signal) ──
+        {upload_progress_panel(entries, set_entries)}
+    }
+}
+
+/// Render the fixed-bottom upload progress panel from the island-local entries
+/// signal. Lives in the SAME island as the drop zone (GAP-04-01) — the signals
+/// are passed in directly, never via `use_context` across an island boundary.
+fn upload_progress_panel(
+    entries: ReadSignal<Vec<(FileEntry, FileEntryName)>>,
+    set_entries: WriteSignal<Vec<(FileEntry, FileEntryName)>>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || !entries.get().is_empty()>
+            <div
+                style="position:fixed;bottom:0;left:0;right:0;\
+                    background:var(--surface);border-top:1px solid var(--border);\
+                    z-index:300;max-height:220px;overflow-y:auto;padding:12px 16px;"
+            >
+                <div style="display:flex;align-items:center;\
+                    justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:12px;color:var(--text-muted);">"Uploads"</span>
+                    <button
+                        style="background:none;border:none;cursor:pointer;\
+                            font-size:12px;color:var(--text-muted);"
+                        on:click=move |_| {
+                            set_entries.update(|v| {
+                                v.retain(|(e, _)| e.status.get() == UploadStatus::InProgress)
+                            });
+                        }
+                    >
+                        "Clear all"
+                    </button>
+                </div>
+                <For
+                    each=move || entries.get()
+                    key=|(e, _)| e.id
+                    children=move |(entry, name_entry)| {
+                        let entry_id = entry.id;
+                        let file_name = name_entry.name.clone();
+                        let status = entry.status;
+                        let progress = entry.progress;
+
+                        let dismiss = move |_| {
+                            set_entries.update(|v| v.retain(|(e, _)| e.id != entry_id));
+                        };
+
+                        let status_icon = move || match status.get() {
+                            UploadStatus::Done => "\u{2713}",     // ✓
+                            UploadStatus::Error => "\u{2717}",    // ✗
+                            UploadStatus::InProgress => "\u{2026}", // …
+                        };
+                        let icon_color = move || match status.get() {
+                            UploadStatus::Done => "var(--success)",
+                            UploadStatus::Error => "var(--destructive)",
+                            UploadStatus::InProgress => "var(--text-muted)",
+                        };
+
+                        // Progress bar fill (0–100) and label.
+                        let pct = move || match progress {
+                            ProgressInfo::Small(sig) => sig.get(),
+                            ProgressInfo::Multipart(sig) => {
+                                let (cur, total) = sig.get();
+                                if total == 0 { 0.0 } else { cur as f64 / total as f64 * 100.0 }
+                            }
+                        };
+                        // Label: "{N}%" for small; "Uploading part {N}/{M}" for multipart (D-07).
+                        let label = move || match progress {
+                            ProgressInfo::Small(sig) => format!("{:.0}%", sig.get()),
+                            ProgressInfo::Multipart(sig) => {
+                                let (cur, total) = sig.get();
+                                if cur == 0 {
+                                    "Starting\u{2026}".to_string()
+                                } else {
+                                    format!("Uploading part {cur}/{total}")
+                                }
+                            }
+                        };
+
+                        let is_done = move || status.get() != UploadStatus::InProgress;
+
+                        view! {
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                                // Filename (truncated, IBM Plex Sans 14px)
+                                <span style="font-size:14px;color:var(--text);flex:1;\
+                                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">
+                                    {file_name}
+                                </span>
+                                // 4px accent progress bar
+                                <div style="width:80px;height:4px;background:var(--border);\
+                                    border-radius:2px;flex-shrink:0;">
+                                    <div style=move || format!(
+                                        "height:4px;background:var(--accent);border-radius:2px;\
+                                        width:{:.1}%;transition:width 150ms ease;",
+                                        pct()
+                                    ) />
+                                </div>
+                                // Label ("{N}%" or "Uploading part N/M")
+                                <span style="font-size:12px;color:var(--text-muted);\
+                                    flex-shrink:0;white-space:nowrap;min-width:80px;text-align:right;">
+                                    {label}
+                                </span>
+                                // Status icon (spinner/✓/✗)
+                                <span style=move || format!(
+                                    "font-size:14px;color:{};flex-shrink:0;",
+                                    icon_color()
+                                )>
+                                    {status_icon}
+                                </span>
+                                // Dismiss × (only when done/error)
+                                <Show when=is_done>
+                                    <button
+                                        aria-label="Dismiss"
+                                        on:click=dismiss
+                                        style="background:none;border:none;cursor:pointer;\
+                                            color:var(--text-muted);font-size:14px;flex-shrink:0;"
+                                    >
+                                        {"\u{00d7}"}
+                                    </button>
+                                </Show>
+                            </div>
+                        }
+                    }
+                />
+            </div>
+        </Show>
     }
 }
 

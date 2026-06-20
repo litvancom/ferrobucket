@@ -29,7 +29,7 @@ use leptos::either::Either;
 use crate::server_fns::presign::presign_fn;
 
 use crate::components::{Breadcrumb, EmptyState, LoadingState, ObjectTable, PaginationBar};
-use crate::islands::{UploadPanel, UploadZone};
+use crate::islands::UploadIsland;
 use crate::server_fns::objects::list_objects_fn;
 
 /// ObjectBrowserPage SSR component (`/ui/buckets/{bucket}`).
@@ -135,9 +135,11 @@ pub fn ObjectBrowserPage() -> impl IntoView {
                 </form>
             </div>
 
-            // Upload zone (drag-and-drop, hydrated island — D-06, D-07, D-08)
+            // Upload island (drag-and-drop zone + fixed-bottom progress panel in
+            // ONE hydrated island — D-06, D-07, D-08; GAP-04-01 fix: zone + panel
+            // share one locally-owned entries signal, no cross-island use_context).
             <div style="padding:0 32px 16px;flex-shrink:0;">
-                <UploadZone bucket=bucket() prefix=prefix() />
+                <UploadIsland bucket=bucket() prefix=prefix() />
             </div>
 
             // Object table with Suspense for SSR loading state
@@ -215,9 +217,6 @@ pub fn ObjectBrowserPage() -> impl IntoView {
                     }}
                 </Suspense>
             </div>
-
-            // Upload panel (bottom fixed bar — per-file progress, hydrated island)
-            <UploadPanel />
         </div>
     }
 }

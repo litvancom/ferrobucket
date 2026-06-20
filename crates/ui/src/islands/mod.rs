@@ -23,5 +23,5 @@ pub use sidebar_status::SidebarStatus;
 pub use slide_over::SlideOver;
 pub use theme_toggle::ThemeToggle;
 pub use toast::{Toast, ToastKind};
-pub use upload_panel::{FileEntry, FileEntryName, ProgressInfo, UploadPanel, UploadStatus};
-pub use upload_zone::{UploadZone, PART_SIZE_BYTES};
+pub use upload_panel::{FileEntry, FileEntryName, ProgressInfo, UploadStatus};
+pub use upload_zone::{UploadIsland, PART_SIZE_BYTES};
