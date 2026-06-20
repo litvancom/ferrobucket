@@ -75,10 +75,24 @@ impl FsStorage {
     }
 }
 
+/// Reserved bucket names: "ui" (the /ui Leptos route prefix, D-01) and "pkg" (the
+/// cargo-leptos site-pkg-dir, D-02). Buckets with these names would shadow the console
+/// route tree or static-asset prefix and become unreachable via the S3 API.
+/// This is a deliberate S3 deviation — documented in README alongside DEC-etag/ACL deviations.
+pub const RESERVED_BUCKET_NAMES: &[&str] = &["ui", "pkg"];
+
 /// Validate an S3 bucket name against strict DNS-safe rules (D-09, RESEARCH.md §"Bucket Name Validation").
 /// Accepts: 3–63 chars, only `[a-z0-9.-]`, no leading/trailing hyphen, no leading/trailing
 /// dot, no consecutive dots, and not formatted as an IPv4 address (WR-07).
 pub fn validate_bucket_name(name: &str) -> Result<(), StorageError> {
+    // Reserved-name guard (D-02): must run before length check so "ui" (2 chars) and
+    // "pkg" (3 chars) both produce the descriptive reserved-name error, not the generic
+    // length error that would mislead the caller about the actual rejection reason.
+    if RESERVED_BUCKET_NAMES.contains(&name) {
+        return Err(StorageError::InvalidBucketName(format!(
+            "'{name}' is reserved by the server and cannot be used as a bucket name"
+        )));
+    }
     let n = name.len();
     if !(3..=63).contains(&n) {
         return Err(StorageError::InvalidBucketName(name.to_owned()));
@@ -725,6 +739,47 @@ mod tests {
     }
 
     // ── Bucket name validation ────────────────────────────────────────────────
+
+    /// REQ-ui-bucket-list / Wave-0 / VALIDATION.md: reserved bucket names are rejected
+    /// with a clear, user-visible error containing "reserved".
+    #[test]
+    fn validate_bucket_name_reserved() {
+        // "ui" is reserved (the /ui Leptos route prefix, D-01).
+        match validate_bucket_name("ui") {
+            Err(StorageError::InvalidBucketName(msg)) => {
+                assert!(
+                    msg.contains("reserved"),
+                    "error message for 'ui' must contain 'reserved', got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidBucketName for 'ui', got {:?}", other),
+        }
+
+        // "pkg" is reserved (the cargo-leptos site-pkg-dir, D-02).
+        match validate_bucket_name("pkg") {
+            Err(StorageError::InvalidBucketName(msg)) => {
+                assert!(
+                    msg.contains("reserved"),
+                    "error message for 'pkg' must contain 'reserved', got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidBucketName for 'pkg', got {:?}", other),
+        }
+
+        // Normal names must still pass (regression: existing DNS-safety checks unaffected).
+        assert!(
+            validate_bucket_name("my-bucket").is_ok(),
+            "valid bucket name 'my-bucket' must still pass"
+        );
+
+        // The Display string for "ui" must contain "reserved".
+        let err = validate_bucket_name("ui").unwrap_err();
+        let display = err.to_string();
+        assert!(
+            display.contains("reserved"),
+            "Display of InvalidBucketName for 'ui' must contain 'reserved', got: {display}"
+        );
+    }
 
     #[test]
     fn bucket_name_validation_accepts_valid() {
