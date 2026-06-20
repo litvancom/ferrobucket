@@ -23,12 +23,15 @@ pub enum ConfirmAction {
 /// - `name`: the bucket/object name shown in the title.
 /// - `bucket`: bucket name.
 /// - `object_key`: object key (empty for bucket delete).
+/// - `aria_label`: accessible label for the icon-only trigger button (UI-SPEC accessibility).
+///   Pass an empty string to omit the attribute.
 #[island]
 pub fn ConfirmModal(
     action: ConfirmAction,
     name: String,
     bucket: String,
     object_key: String,
+    aria_label: String,
 ) -> impl IntoView {
     let (open, set_open) = signal(false);
     let (loading, set_loading) = signal(false);
@@ -37,6 +40,7 @@ pub fn ConfirmModal(
     let name = StoredValue::new(name);
     let bucket = StoredValue::new(bucket);
     let object_key = StoredValue::new(object_key);
+    let aria_label = StoredValue::new(aria_label);
 
     let title = move || {
         let n = name.get_value();
@@ -90,9 +94,13 @@ pub fn ConfirmModal(
     };
 
     view! {
-        // Delete trigger button (destructive color, icon-only or with label)
+        // Delete trigger button (destructive color, icon-only — aria-label required for accessibility)
         <button
             on:click=handle_open
+            aria-label=move || {
+                let lbl = aria_label.get_value();
+                if lbl.is_empty() { None } else { Some(lbl) }
+            }
             style="background:none;border:none;cursor:pointer;\
                 color:var(--destructive);font-size:14px;padding:4px 8px;\
                 border-radius:4px;transition:background-color 150ms ease;"
