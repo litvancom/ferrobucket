@@ -76,7 +76,7 @@ pub fn ThemeToggle() -> impl IntoView {
             class="theme-toggle"
             aria-label="Toggle theme"
             on:click=toggle
-            style="background:none;border:none;cursor:pointer;padding:8px;color:var(--text);display:flex;align-items:center;justify-content:center;border-radius:4px;transition:background-color 150ms ease;"
+            style="background:none;border:none;cursor:pointer;padding:8px 8px 8px 0;color:var(--text);display:flex;align-items:center;justify-content:flex-start;border-radius:4px;transition:background-color 150ms ease;"
         >
             {move || {
                 if theme.get() == "light" {
