@@ -1,4 +1,7 @@
 //! ferrobucket — S3-compatible object storage server.
+// Leptos SSR generates deeply nested generic types in release builds.
+// The default limit (128) is insufficient; 256 resolves the overflow.
+#![recursion_limit = "256"]
 //!
 //! Subcommands (D-01):
 //!   - `serve` — run the S3-compatible HTTP server (original behaviour)
