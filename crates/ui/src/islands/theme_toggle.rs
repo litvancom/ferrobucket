@@ -1,40 +1,40 @@
 //! ThemeToggle island — toggles `data-theme` on `<html>`, persists in `localStorage`.
 //!
-//! Security invariant (DEC-ui-ssr / T-04-12): only the `"theme"` key is written to
+//! Security invariant (DEC-ui-ssr / T-04-07A): only the `"theme"` key is written to
 //! localStorage. No credentials, signing keys, or secret material touch this island.
-//! `data-theme` is set to the literal string `"light"` or removed (never user input).
+//! `data-theme` is set to the literal string `"dark"` or removed (never user input).
 
 use leptos::prelude::*;
 
 /// Apply `theme` to the document element.
 ///
-/// Dark (default): removes `data-theme` attribute.
-/// Light: sets `data-theme="light"`.
+/// Light (default): removes `data-theme` attribute (absent = light per :root palette).
+/// Dark: sets `data-theme="dark"`.
 #[cfg(feature = "hydrate")]
 fn apply_theme(theme: &str) {
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
         if let Some(html) = doc.document_element() {
-            if theme == "light" {
-                let _ = html.set_attribute("data-theme", "light");
+            if theme == "dark" {
+                let _ = html.set_attribute("data-theme", "dark");
             } else {
-                // Dark default: no attribute
+                // Light default: no attribute needed (matches :root palette)
                 let _ = html.remove_attribute("data-theme");
             }
         }
     }
 }
 
-/// ThemeToggle island: sun/moon button that flips between dark (default) and light themes.
+/// ThemeToggle island: sun/moon button that flips between light (default) and dark themes.
 ///
 /// On mount, reads `localStorage["theme"]` and applies it. On click, toggles, writes
-/// `localStorage["theme"]`, and updates `data-theme` on `<html>`. Dark is the default
-/// (no attribute on `<html>`).
+/// `localStorage["theme"]`, and updates `data-theme` on `<html>`. Light is the default
+/// (no attribute on `<html>`; absent = light per :root palette — DEC-ui-theme-default).
 ///
 /// SECURITY: only the string `"light"` or `"dark"` is stored in localStorage. No credentials.
 /// No signing, presign, hmac, sigv4, or secret_key code in this island.
 #[island]
 pub fn ThemeToggle() -> impl IntoView {
-    let (theme, set_theme) = signal("dark".to_string());
+    let (theme, set_theme) = signal("light".to_string());
 
     // On mount: read persisted theme from localStorage and apply it.
     Effect::new(move |_| {
@@ -47,7 +47,7 @@ pub fn ThemeToggle() -> impl IntoView {
                         set_theme.set(saved);
                         apply_theme(&saved_clone);
                     }
-                    // If no saved value, default is "dark" — no attribute needed.
+                    // If no saved value, default is "light" — no attribute needed.
                 }
             }
         }
@@ -57,7 +57,7 @@ pub fn ThemeToggle() -> impl IntoView {
         #[cfg(feature = "hydrate")]
         {
             let current = theme.get_untracked();
-            let next = if current == "dark" { "light" } else { "dark" };
+            let next = if current == "light" { "dark" } else { "light" };
             set_theme.set(next.to_string());
             apply_theme(next);
             if let Some(window) = web_sys::window() {
@@ -68,7 +68,9 @@ pub fn ThemeToggle() -> impl IntoView {
         }
     };
 
-    // Sun icon (light) vs moon icon (dark) — Lucide-style inline SVG paths.
+    // Sun icon (light mode) vs moon icon (dark mode) — Lucide-style inline SVG paths.
+    // When in light mode: show moon icon (click to switch to dark).
+    // When in dark mode: show sun icon (click to switch to light).
     view! {
         <button
             class="theme-toggle"
@@ -78,7 +80,7 @@ pub fn ThemeToggle() -> impl IntoView {
         >
             {move || {
                 if theme.get() == "light" {
-                    // Moon icon (switch to dark)
+                    // Moon icon — currently in light mode, click to switch to dark
                     view! {
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -96,7 +98,7 @@ pub fn ThemeToggle() -> impl IntoView {
                     }
                     .into_any()
                 } else {
-                    // Sun icon (switch to light)
+                    // Sun icon — currently in dark mode, click to switch to light
                     view! {
                         <svg
                             xmlns="http://www.w3.org/2000/svg"

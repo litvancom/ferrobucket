@@ -7,9 +7,14 @@ use crate::app::App;
 /// Returns the full `<!DOCTYPE html>` document with:
 /// - `<HydrationScripts options islands=true/>` for islands-mode hydration
 /// - IBM Plex Sans + IBM Plex Mono Google Fonts links
-/// - Inline `<style>` with the CSS-variable palette (dark `:root` + `[data-theme="light"]`)
-/// - `<body data-theme>` defaulting to dark (no attribute = dark per `:root` palette)
+/// - Inline `<style>` with the CSS-variable palette (light `:root` default + `[data-theme="dark"]` override)
+/// - `<body>` with no `data-theme` attribute — absent attribute means light (the `:root` palette)
 /// - `<App/>` rendered server-side; islands hydrated by the WASM loader
+///
+/// # Theme default (DEC-ui-theme-default)
+/// `:root` holds the light palette — no attribute on `<html>` means light at first paint.
+/// The ThemeToggle island sets `data-theme="dark"` when the user switches to dark.
+/// This ensures no-JS / pre-hydration visitors see the light palette, not a dark flash.
 ///
 /// # Pattern
 /// Follows RESEARCH.md Pattern 8 (HydrationScripts islands=true, DECISIONS.md §3.5).
@@ -36,7 +41,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                     href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;600&display=swap"
                 />
 
-                // CSS variable palette (dark default + light override).
+                // CSS variable palette (light default + dark override).
                 // Inlined so the palette is available before any external asset loads.
                 // The full palette lives in styles.css; this ensures it is available SSR.
                 <style>
@@ -48,8 +53,8 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 // This minimises the WASM bundle size (REQ-ui-theming, idle-RAM goal).
                 <HydrationScripts options=options.clone() islands=true />
             </head>
-            // data-theme attribute: absent = dark (matches :root palette).
-            // The ThemeToggle island sets data-theme="light" for the light theme.
+            // No data-theme attribute on <html>: absent attribute = light (matches :root palette).
+            // The ThemeToggle island sets data-theme="dark" when the user chooses the dark theme.
             <body>
                 <App/>
             </body>
