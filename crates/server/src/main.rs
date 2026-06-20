@@ -6,10 +6,17 @@
 //!
 //! Security: --secret-key is never printed or logged (T-03-07).
 
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use axum::routing::{get, post};
 use clap::{Args, Parser, Subcommand};
 use ferrobucket_storage::FsStorage;
-use ferrobucket_server::FerrobucketS3;
-use std::net::SocketAddr;
+use ferrobucket_server::{ui, FerrobucketS3};
+use leptos::config::get_configuration;
+use leptos::prelude::provide_context;
+use leptos_axum::{generate_route_list, LeptosRoutes};
+use tower_http::services::ServeDir;
 
 // ─── Top-level CLI ────────────────────────────────────────────────────────────
 
@@ -135,17 +142,24 @@ fn tracing_or_stderr(msg: &str) {
 
 /// Run the S3 HTTP server (original behaviour relocated from `main`).
 async fn run_serve(args: ServeArgs) -> anyhow::Result<()> {
-    let storage = FsStorage::new(&args.data);
-    let adapter = FerrobucketS3::new(storage);
+    // ── Build FsStorage (shared between S3 adapter and AppState) ────────────────
+    // A single FsStorage is created; the S3 adapter takes ownership of one copy
+    // and AppState wraps another in Arc. Both point to the same data root (args.data).
+    // FsStorage only holds a PathBuf so constructing two instances is equivalent to
+    // sharing one — no in-memory state divergence (FsStorage is stateless beyond the path).
+    let storage_for_s3 = FsStorage::new(&args.data);
+    let storage_for_ui = Arc::new(FsStorage::new(&args.data));
 
+    // ── S3 service ───────────────────────────────────────────────────────────────
+    let adapter = FerrobucketS3::new(storage_for_s3);
     let mut builder = s3s::service::S3ServiceBuilder::new(adapter);
 
     // D-07: conditional auth — --anonymous skips SimpleAuth entirely.
     if !args.anonymous {
-        let access = args.access_key.ok_or_else(|| {
+        let access = args.access_key.clone().ok_or_else(|| {
             anyhow::anyhow!("--access-key is required unless --anonymous is set")
         })?;
-        let secret = args.secret_key.ok_or_else(|| {
+        let secret = args.secret_key.clone().ok_or_else(|| {
             anyhow::anyhow!("--secret-key is required unless --anonymous is set")
         })?;
         // SimpleAuth is region-agnostic by design (D-06): it verifies the HMAC using
@@ -160,8 +174,67 @@ async fn run_serve(args: ServeArgs) -> anyhow::Result<()> {
     // they are already serialized to HTTP by s3s.
     let s3_wrapped = axum::error_handling::HandleError::new(s3_service, handle_s3_error);
 
-    // Phase 4 adds Leptos routes before .fallback_service() — zero lines here change.
-    let app = axum::Router::new().fallback_service(s3_wrapped);
+    // ── Leptos configuration (Open Question 1 resolution) ───────────────────────
+    // `get_configuration(None)` reads from LEPTOS_* env vars set by `cargo leptos`.
+    // For standalone `cargo run` from the workspace root, fall back to reading the
+    // workspace Cargo.toml directly so `site_root` resolves correctly (Pitfall 5).
+    let conf = get_configuration(None)
+        .or_else(|_| get_configuration(Some("Cargo.toml")))
+        .expect("could not load Leptos config (run from workspace root or use `cargo leptos`)");
+    let leptos_options = conf.leptos_options;
+
+    // ── Build AppState ────────────────────────────────────────────────────────────
+    let endpoint = format!("http://{}", args.listen);
+    let app_state = ui::AppState {
+        storage: storage_for_ui,
+        leptos_options: leptos_options.clone(),
+        endpoint,
+        region: args.region.clone(),
+        access_key_id: args.access_key.clone(),
+        secret_key: args.secret_key.clone().unwrap_or_default(),
+        data_root: args.data.clone(),
+        anonymous: args.anonymous,
+    };
+
+    // ── Leptos route list ─────────────────────────────────────────────────────────
+    let routes = generate_route_list(ferrobucket_ui::App);
+
+    // ── /pkg static asset path (Pitfall 5: derive from site_root, not CWD string) ─
+    let pkg_path = format!("{}/pkg", leptos_options.site_root);
+    let pkg_service = ServeDir::new(&pkg_path);
+
+    // ── Mount order (D-01, RESEARCH Pattern 1) ───────────────────────────────────
+    //
+    // Mount-order invariant: Leptos routes + /pkg + /ui handlers MUST appear BEFORE
+    // `.fallback_service(s3_wrapped)` so that /ui/* and /pkg/* are never forwarded
+    // to S3. The S3 fallback only handles requests that don't match earlier routes.
+    //
+    // Pitfall 1: do NOT use axum::Router::nest("/ui", ...) — the /ui prefix lives
+    //            in the Leptos route tree (App's ParentRoute). Nesting creates /ui/ui/.
+    let app = axum::Router::new()
+        // 1. Upload/download axum handlers (raw streaming — no Leptos involvement)
+        .route("/ui/upload/{bucket}/{*key}", post(ui::upload_handler))
+        .route("/ui/download/{bucket}/{*key}", get(ui::download_handler))
+        // 2. Static WASM/JS/CSS assets built by cargo-leptos at target/site/pkg
+        .nest_service("/pkg", pkg_service)
+        // 3. Leptos SSR routes — injects AppState as Leptos context for server fns
+        //    generate_route_list(App) emits paths starting with /ui (from ParentRoute),
+        //    so the S3 fallback never sees /ui/* requests (RESEARCH A2, Pitfall 1).
+        .leptos_routes_with_context(
+            &app_state,
+            routes,
+            {
+                let app_state = app_state.clone();
+                move || provide_context(app_state.clone())
+            },
+            {
+                let leptos_options = leptos_options.clone();
+                move || ferrobucket_ui::shell(leptos_options.clone())
+            },
+        )
+        // 4. S3 fallback — MUST be last; never sees /ui/* or /pkg/* (mount-order invariant D-01)
+        .fallback_service(s3_wrapped)
+        .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     axum::serve(listener, app).await?;
