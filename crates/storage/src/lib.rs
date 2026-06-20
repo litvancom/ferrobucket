@@ -9,6 +9,7 @@ pub mod fs;
 pub mod list;
 pub mod meta;
 pub mod multipart;
+pub mod presign;
 pub mod range;
 
 pub use encode::{decode_key, encode_key};
@@ -16,6 +17,7 @@ pub use fs::FsStorage;
 pub use list::{ListV2Req, ListV2Res};
 pub use meta::{BucketInfo, ObjectMeta};
 pub use multipart::MultipartMeta;
+pub use presign::presign_url;
 pub use range::ByteRange;
 
 #[derive(Error, Debug)]
