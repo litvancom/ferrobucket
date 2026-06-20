@@ -10,9 +10,6 @@ crate-type = ["cdylib", "rlib"]
 hydrate = [
     "leptos/hydrate",
     "leptos/islands",
-    "dep:wasm-bindgen",
-    "dep:web-sys",
-    "dep:wasm-bindgen-futures",
     "dep:js-sys",
     "dep:gloo-net",
     "dep:console_error_panic_hook",
@@ -34,9 +31,11 @@ leptos_router = { version = "=0.8.13" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 
-# hydrate-only (browser WASM)
-wasm-bindgen = { version = "0.2", optional = true }
-web-sys = { version = "0.3", optional = true, features = [
+# browser bindings — non-optional: #[island] closure type signatures (web_sys::DragEvent,
+# SubmitEvent, FileList, …) are compiled under ssr too, so the types must always resolve.
+# The runtime bodies that call these APIs stay #[cfg(feature = "hydrate")]-gated.
+wasm-bindgen = { version = "0.2" }
+web-sys = { version = "0.3", features = [
     "XmlHttpRequest",
     "XmlHttpRequestUpload",
     "ProgressEvent",
@@ -58,7 +57,7 @@ web-sys = { version = "0.3", optional = true, features = [
     "RequestInit",
     "Response",
 ] }
-wasm-bindgen-futures = { version = "0.4", optional = true }
+wasm-bindgen-futures = { version = "0.4" }
 js-sys = { version = "0.3", optional = true }
 gloo-net = { version = "0.6", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
