@@ -1,0 +1,91 @@
+/* ferrobucket Web UI — CSS Variable Palette
+ * Dark theme on :root (default); light theme via [data-theme="light"].
+ * Source: UI-SPEC.md CSS Variable Reference, REQ-ui-theming.
+ * Accent: #4c97f8 (dark) / #2563eb (light).
+ * Fonts: IBM Plex Sans (body/UI), IBM Plex Mono (keys/values/ETags/timestamps).
+ */
+
+:root {
+  /* Backgrounds */
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --surface-raised: #222222;
+  --mono-bg: #161616;
+
+  /* Borders */
+  --border: #2a2a2a;
+
+  /* Text */
+  --text: #e8e8e8;
+  --text-muted: #888888;
+
+  /* Accent (10% — reserved for primary CTAs, focus rings, active states) */
+  --accent: #4c97f8;
+  --accent-hover: #6aaeff;
+
+  /* Semantic */
+  --destructive: #e05252;
+  --destructive-hover: #ef6b6b;
+  --success: #4ade80;
+  --warning: #f59e0b;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f5f5f5;
+  --surface-raised: #ebebeb;
+  --mono-bg: #f0f0f0;
+  --border: #e0e0e0;
+  --text: #111111;
+  --text-muted: #666666;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --destructive: #dc2626;
+  --destructive-hover: #b91c1c;
+  --success: #16a34a;
+  --warning: #d97706;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────────────── */
+/* 4 sizes only: 12px (label) / 13px (mono) / 14px (body) / 16px (heading).
+ * 2 weights for IBM Plex Sans: 400 (regular) + 600 (semibold). Mono: 400 only.
+ * Source: UI-SPEC.md Typography section.
+ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* ── Layout shell ────────────────────────────────────────────────────────────── */
+/* Filled by Plan 03 with sidebar, main, and toast stack. */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  overflow-y: auto;
+}
+
+/* ── Transitions ─────────────────────────────────────────────────────────────── */
+/* 150ms ease on color/background/border transitions (UI-SPEC Interaction States). */
+
+button, a, [role="button"] {
+  transition: background-color 150ms ease, color 150ms ease,
+              border-color 150ms ease, opacity 150ms ease;
+}

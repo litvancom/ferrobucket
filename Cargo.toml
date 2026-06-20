@@ -4,3 +4,17 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
+
+# cargo-leptos workspace metadata (Phase 0 compile-verified key set, DECISIONS.md §3.7).
+# Assumption A1: workspace form [[workspace.metadata.leptos]] with bin-package/lib-package
+# keys — verified by cargo leptos build in Task 3 (Wave-0 compile gate).
+[[workspace.metadata.leptos]]
+name = "ferrobucket-ui"
+bin-package = "ferrobucket-server"
+lib-package = "ferrobucket-ui"
+output-name = "ferrobucket-ui"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+lib-features = ["hydrate"]
+bin-features = ["ssr"]
+# No inline CSS tool dependency — palette is inlined in shell.rs (Phase 0 D, DECISIONS.md §3.4)
