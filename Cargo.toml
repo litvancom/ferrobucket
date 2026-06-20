@@ -11,6 +11,7 @@ edition = "2024"
 [[workspace.metadata.leptos]]
 name = "ferrobucket-ui"
 bin-package = "ferrobucket-server"
+bin-exe-name = "ferrobucket"
 lib-package = "ferrobucket-ui"
 output-name = "ferrobucket-ui"
 site-root = "target/site"

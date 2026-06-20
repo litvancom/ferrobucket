@@ -7,6 +7,12 @@ edition.workspace = true
 name = "ferrobucket"
 path = "src/main.rs"
 
+# cargo-leptos passes bin-features=["ssr"] when building the server binary.
+# This feature gate is a stub that satisfies the cargo-leptos build requirement;
+# the actual Leptos mount seam (leptos_routes_with_context + AppState) is wired in Plan 03.
+[features]
+ssr = []
+
 [dependencies]
 ferrobucket-storage = { path = "../storage" }
 s3s           = { version = "=0.13.0" }
