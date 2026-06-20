@@ -1,5 +1,6 @@
 pub mod app;
 pub mod shell;
+pub mod types;
 
 /// Bucket list, object browser, settings pages — filled by Plan 05.
 pub mod pages;
