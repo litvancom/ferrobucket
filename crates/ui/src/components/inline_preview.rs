@@ -1,14 +1,14 @@
 //! InlinePreview SSR component — size-gated image/text preview.
 //!
 //! SECURITY (T-04-15, T-04-16):
-//! - SVG and all images rendered as `<img src="/ui/download/...">` — NEVER inline <svg>.
-//! - Images only if size ≤ 5 MB (5_242_880 bytes).
-//! - Text only if size ≤ 512 KB (524_288 bytes).
+//! - All images (including SVG) rendered as HTML img tags with src=/ui/download/...
+//!   NEVER as inline SVG elements — this prevents embedded script execution.
+//! - Images only if size <= 5 MB (5_242_880 bytes).
+//! - Text only if size <= 512 KB (524_288 bytes).
 //! - Over-limit: "File too large to preview (>{limit})".
 //! - Unknown type: "No preview available for this file type."
 //!
-//! Security invariant: SSR-only. No presign/hmac/secret/sigv4 code.
-//! `grep -c '<svg' crates/ui/src/components/inline_preview.rs` must be 0.
+//! Security invariant: SSR-only. No presign/hmac/sigv4 code. No inline SVG elements.
 
 use leptos::prelude::*;
 

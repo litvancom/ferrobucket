@@ -4,6 +4,10 @@ use leptos_router::{
     path,
 };
 
+use crate::components::Sidebar;
+use crate::islands::Toast;
+use crate::pages::{BucketListPage, ObjectBrowserPage, SettingsPage};
+
 /// Root Leptos application component.
 ///
 /// Defines the router with all routes nested under the `/ui` parent prefix
@@ -22,7 +26,6 @@ pub fn App() -> impl IntoView {
         <Router>
             <Routes fallback=|| view! { <p>"Not found"</p> }>
                 <ParentRoute path=path!("/ui") view=Shell>
-                    // Wave 0 stubs — real implementations in Plan 05 (Wave 1).
                     <Route path=path!("") view=BucketListPage />
                     <Route path=path!("buckets/:bucket") view=ObjectBrowserPage />
                     <Route path=path!("settings") view=SettingsPage />
@@ -32,35 +35,26 @@ pub fn App() -> impl IntoView {
     }
 }
 
-/// Layout shell wrapping sidebar + main content area.
+/// Layout shell wrapping sidebar + main content area + toast stack.
 ///
-/// Wave 0 stub — Plan 03 adds the real sidebar, theme toggle, and toast stack.
-/// `<Outlet />` is where child routes render their content.
+/// The Shell renders the 220px Sidebar (SSR-only), the main content area
+/// (`<Outlet />` — child routes), and the Toast island (hydrated).
+///
+/// Sidebar receives no bucket list here (no server fn call from shell — pages
+/// handle their own data). Sidebar shows only the settings link + theme toggle
+/// + status at the shell level. The bucket nav list is populated on each page.
 #[component]
 fn Shell() -> impl IntoView {
     view! {
         <div class="app-shell">
-            <main class="main-content">
+            // 220px fixed sidebar (SSR)
+            <Sidebar />
+            // Main content area — child route renders here
+            <main class="main-content" style="overflow-y:auto;">
                 <Outlet />
             </main>
+            // Toast island (top-right stack, hydrated)
+            <Toast />
         </div>
     }
-}
-
-/// Bucket list page stub (`/ui`). Filled by Plan 05.
-#[component]
-fn BucketListPage() -> impl IntoView {
-    view! { <h1>"Bucket List"</h1> }
-}
-
-/// Object browser page stub (`/ui/buckets/{bucket}`). Filled by Plan 05.
-#[component]
-fn ObjectBrowserPage() -> impl IntoView {
-    view! { <h1>"Object Browser"</h1> }
-}
-
-/// Settings page stub (`/ui/settings`). Filled by Plan 05.
-#[component]
-fn SettingsPage() -> impl IntoView {
-    view! { <h1>"Settings"</h1> }
 }
