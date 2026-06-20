@@ -12,6 +12,8 @@ hydrate = [
     "leptos/islands",
     "dep:wasm-bindgen",
     "dep:web-sys",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
     "dep:gloo-net",
     "dep:console_error_panic_hook",
 ]
@@ -47,8 +49,17 @@ web-sys = { version = "0.3", optional = true, features = [
     "Window",
     "Document",
     "HtmlElement",
+    "HtmlInputElement",
     "Storage",
+    "Navigator",
+    "Clipboard",
+    "Location",
+    "Request",
+    "RequestInit",
+    "Response",
 ] }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
 gloo-net = { version = "0.6", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 

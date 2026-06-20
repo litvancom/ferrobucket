@@ -754,6 +754,7 @@ dependencies = [
  "console_error_panic_hook",
  "ferrobucket-storage",
  "gloo-net",
+ "js-sys",
  "leptos",
  "leptos_axum",
  "leptos_meta",
@@ -763,6 +764,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
