@@ -24,8 +24,11 @@ pub use shell::shell;
 ///
 /// Called automatically by the browser when the WASM module loads
 /// (`#[wasm_bindgen(start)]` attribute). Installs the panic hook for
-/// readable console errors, then mounts the Leptos App into the existing
-/// SSR-rendered body.
+/// readable console errors, then hydrates the `#[island]` components in the
+/// existing SSR-rendered page. Islands mode (`shell.rs` renders
+/// `HydrationScripts islands=true`) requires `hydrate_islands()`, NOT
+/// `hydrate_body(App)` — the latter walks a full-app marker tree that does not
+/// match the islands-shaped SSR output and panics in `tachys` hydration.
 ///
 /// Gated to `#[cfg(feature = "hydrate")]` so this function is never
 /// compiled into the server binary (DEC-ui-ssr: no signing or credentials
@@ -34,5 +37,5 @@ pub use shell::shell;
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn hydrate() {
     console_error_panic_hook::set_once();
-    leptos::mount::hydrate_body(App);
+    leptos::mount::hydrate_islands();
 }
