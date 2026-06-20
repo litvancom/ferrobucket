@@ -155,7 +155,7 @@ fn tracing_or_stderr(msg: &str) {
 #[cfg(feature = "embed-assets")]
 mod embedded {
     use axum::http::{StatusCode, header};
-    use axum::response::{IntoResponse, Response};
+    use axum::response::IntoResponse;
     use rust_embed::Embed;
 
     #[derive(Embed)]

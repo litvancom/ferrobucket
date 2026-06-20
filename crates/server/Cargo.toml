@@ -11,7 +11,7 @@ path = "src/main.rs"
 # Plan 03 wires the real Leptos mount seam (leptos_routes_with_context + AppState).
 [features]
 ssr = []
-embed-assets = ["dep:rust-embed"]
+embed-assets = ["dep:rust-embed", "dep:mime_guess"]
 
 [dependencies]
 ferrobucket-storage = { path = "../storage" }
@@ -40,6 +40,7 @@ leptos_router = { version = "=0.8.13", features = ["ssr"] }
 tower-http = { version = "0.6", features = ["fs"] }
 # Embedded static assets for release builds (D-01/D-02 — embed-assets feature).
 rust-embed = { version = "8", features = ["axum-ex"], optional = true }
+mime_guess = { version = "2", optional = true }
 # Serialization — needed by upload handler (complete multipart body JSON parsing).
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
