@@ -1,0 +1,37 @@
+# Build artefacts — largest directory; must be excluded to keep the build
+# context small (cargo's incremental cache is not reusable inside Docker anyway).
+target/
+
+# Version-control history — not needed inside the image.
+.git/
+.gitignore
+
+# Planning documents — internal; must not be baked into the image.
+.planning/
+
+# Local development / scratch directories.
+scratch/
+data/
+
+# Local database files (development artefacts).
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment / secrets files — must never enter the build context (T-05-02).
+.env
+.env.*
+*.env
+
+# macOS filesystem artefacts.
+.DS_Store
+
+# IDE configuration.
+.idea/
+.vscode/
+*.iml
+
+# Temporary files.
+*.tmp
+*.swp
+*~
