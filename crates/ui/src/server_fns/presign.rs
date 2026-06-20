@@ -34,9 +34,17 @@ pub async fn presign_fn(
         let state = expect_context::<AppState>();
         let path = format!("/{bucket}/{key}");
         let access_key = state.access_key_id.as_deref().unwrap_or("");
+        // `state.endpoint` is scheme-included (`format!("http://{listen}")` in
+        // server/src/main.rs), but `presign_url` prepends `http://{host}` itself.
+        // Strip the scheme here so the minted URL has a single `http://` (GAP-04-07).
+        let host = state
+            .endpoint
+            .strip_prefix("https://")
+            .or_else(|| state.endpoint.strip_prefix("http://"))
+            .unwrap_or(state.endpoint.as_str());
         let url = ferrobucket_storage::presign::presign_url(
             "GET",
-            &state.endpoint,
+            host,
             &path,
             900, // D-05: 900s TTL hard-coded
             access_key,
