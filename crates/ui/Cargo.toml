@@ -22,6 +22,7 @@ ssr = [
     "leptos_meta/ssr",
     "leptos_router/ssr",
     "dep:ferrobucket-storage",
+    "dep:time",
 ]
 
 [dependencies]
@@ -64,6 +65,7 @@ console_error_panic_hook = { version = "0.1", optional = true }
 
 # ssr-only (server)
 
+time = { version = "0.3", optional = true, features = ["formatting"] }
 axum = { version = "=0.8.8", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
 leptos_axum = { version = "=0.8.9", optional = true }

@@ -10,6 +10,19 @@ use leptos::prelude::*;
 use crate::server_fns::state::AppState;
 use crate::types::BucketRow;
 
+/// Format a `time::OffsetDateTime` as RFC3339 with whole-second precision and a `Z` suffix
+/// (e.g. `2026-06-20T12:12:51Z`). Falls back to `to_string()` only if formatting fails.
+///
+/// SSR-only: compiled exclusively when the `ssr` feature is active.
+#[cfg(feature = "ssr")]
+pub(crate) fn rfc3339(ts: time::OffsetDateTime) -> String {
+    use time::format_description::well_known::Rfc3339;
+    ts.replace_nanosecond(0)
+        .ok()
+        .and_then(|t| t.format(&Rfc3339).ok())
+        .unwrap_or_else(|| ts.to_string())
+}
+
 /// List all buckets, deriving `object_count` and `total_size` for each.
 ///
 /// `BucketInfo` from storage does not carry count or size — they are computed
@@ -50,7 +63,7 @@ pub async fn list_buckets_fn() -> Result<Vec<BucketRow>, ServerFnError> {
 
             rows.push(BucketRow {
                 name: bucket.name.clone(),
-                created: bucket.created_at.to_string(),
+                created: rfc3339(bucket.created_at),
                 object_count,
                 total_size,
             });

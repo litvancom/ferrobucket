@@ -7,6 +7,8 @@ use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
 use crate::server_fns::state::AppState;
+#[cfg(feature = "ssr")]
+use crate::server_fns::buckets::rfc3339;
 use crate::types::{ObjectDetail, ObjectListing, ObjectRow};
 
 /// List objects under `prefix` in `bucket`, using `"/"` as delimiter so that
@@ -48,7 +50,7 @@ pub async fn list_objects_fn(
             .map(|o| ObjectRow {
                 key: o.key,
                 size: o.size,
-                last_modified: o.last_modified.to_string(),
+                last_modified: rfc3339(o.last_modified),
                 is_folder: false,
             })
             .collect();
@@ -87,7 +89,7 @@ pub async fn head_object_fn(
             size: meta.size,
             content_type: meta.content_type,
             etag: meta.etag,
-            last_modified: meta.last_modified.to_string(),
+            last_modified: rfc3339(meta.last_modified),
         })
     }
 
