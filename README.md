@@ -111,20 +111,20 @@ For any other SDK, the equivalent setting is `force_path_style = true`.
 
 ## Docker
 
-### Pull from GHCR (recommended)
+### Pull from Docker Hub (recommended)
 
-A multi-arch image (`linux/amd64` + `linux/arm64`) is published to the GitHub
-Container Registry:
+A multi-arch image (`linux/amd64` + `linux/arm64`) is published to Docker Hub at
+[`litvancom/ferrobucket`](https://hub.docker.com/r/litvancom/ferrobucket):
 
 ```bash
 docker run -p 9000:9000 -v ./data:/data \
-  ghcr.io/litvancom/ferrobucket --anonymous
+  litvancom/ferrobucket --anonymous
 
 # or with a static credential
 docker run -p 9000:9000 -v ./data:/data \
   -e FERROBUCKET_ACCESS_KEY=myaccesskey \
   -e FERROBUCKET_SECRET_KEY=mysecretkey \
-  ghcr.io/litvancom/ferrobucket
+  litvancom/ferrobucket
 ```
 
 S3 API + web UI are then on `http://127.0.0.1:9000` (UI at `/ui`).
