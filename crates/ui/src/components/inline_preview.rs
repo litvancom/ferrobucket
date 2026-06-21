@@ -53,29 +53,63 @@ pub fn InlinePreview(
         if size > IMAGE_SIZE_GATE {
             // Refuse — size gate (T-04-16)
             view! {
-                <p style="font-size:12px;color:var(--text-muted);font-style:italic;">
+                <p style="font-size:12px;color:var(--faint);font-style:italic;margin:0;">
                     "File too large to preview (>5 MB)"
                 </p>
             }.into_any()
         } else {
             // Render as <img> — NEVER inline SVG (T-04-15, Security Domain).
             // SVG also rendered as <img> here so the browser sandboxes any embedded script.
+            // Click the thumbnail to open a full-screen lightbox (this component runs
+            // inside the SlideOver island, so the click handler is interactive).
+            let (zoom, set_zoom) = signal(false);
+            let full_url = download_url.clone();
+            let alt_thumb = key.clone();
+            let alt_full = key.clone();
             view! {
                 <img
                     src=download_url
-                    alt=key
+                    alt=alt_thumb
+                    title="Click to view full image"
+                    on:click=move |_| set_zoom.set(true)
                     style="max-width:100%;max-height:300px;\
-                        object-fit:contain;display:block;\
-                        border-radius:4px;border:1px solid var(--border);"
+                        object-fit:contain;display:block;margin:0 auto;\
+                        border-radius:7px;cursor:zoom-in;"
                     loading="lazy"
                 />
+                <Show when=move || zoom.get()>
+                    <div
+                        on:click=move |_| set_zoom.set(false)
+                        style="position:fixed;inset:0;z-index:70;\
+                            background:rgba(0,0,0,.85);display:flex;\
+                            align-items:center;justify-content:center;padding:32px;\
+                            cursor:zoom-out;animation:overlayIn .15s ease;"
+                    >
+                        <img
+                            src=full_url.clone()
+                            alt=alt_full.clone()
+                            style="max-width:95vw;max-height:95vh;object-fit:contain;\
+                                border-radius:6px;box-shadow:var(--shadow);"
+                        />
+                        <button
+                            aria-label="Close image"
+                            on:click=move |_| set_zoom.set(false)
+                            style="position:fixed;top:18px;right:22px;width:36px;height:36px;\
+                                display:flex;align-items:center;justify-content:center;\
+                                border:none;border-radius:8px;background:rgba(255,255,255,.12);\
+                                color:#fff;cursor:pointer;"
+                        >
+                            <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        </button>
+                    </div>
+                </Show>
             }.into_any()
         }
     } else if is_text {
         if size > TEXT_SIZE_GATE {
             // Refuse — size gate (T-04-16)
             view! {
-                <p style="font-size:12px;color:var(--text-muted);font-style:italic;">
+                <p style="font-size:12px;color:var(--faint);font-style:italic;margin:0;">
                     "File too large to preview (>512 KB)"
                 </p>
             }.into_any()
@@ -88,7 +122,7 @@ pub fn InlinePreview(
             // is available. For SSR-only (no WASM fetching), we link to download.
             view! {
                 <div>
-                    <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px 0;">
+                    <p style="font-size:12px;color:var(--faint);margin:0;">
                         "Text preview — "
                         <a
                             href=download_url

@@ -26,18 +26,20 @@ pub fn CopyField(
     let copy_value = value.clone();
 
     view! {
-        <div style="display:flex;align-items:center;gap:0;\
-            border:1px solid var(--border);border-radius:4px;overflow:hidden;">
-            // Read-only text area — IBM Plex Mono 13px on --mono-bg
+        <div style="display:flex;align-items:center;gap:6px;\
+            border:1px solid var(--border-2);border-radius:7px;\
+            background:var(--bg);padding:4px 4px 4px 11px;overflow:hidden;">
+            // Read-only text area — IBM Plex Mono 12px on --bg
             <input
                 type="text"
                 readonly
                 value=value
                 aria-label=label
-                style="flex:1;background:var(--mono-bg);color:var(--text);\
-                    font-family:'IBM Plex Mono',monospace;font-size:13px;\
-                    border:none;padding:8px 12px;outline:none;\
-                    min-width:0;cursor:text;"
+                style="flex:1;background:transparent;color:var(--dim);\
+                    font-family:'IBM Plex Mono',monospace;font-size:11.5px;\
+                    border:none;padding:0;outline:none;\
+                    min-width:0;cursor:text;\
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
             />
             // CopyButton island (hydrated)
             <CopyButton

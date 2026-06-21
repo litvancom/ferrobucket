@@ -1,5 +1,9 @@
 # ferrobucket
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2024-orange.svg)](https://www.rust-lang.org/)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 A lightweight, self-hosted S3-compatible object storage server with a built-in web UI,
 written in Rust and shipped as a single self-contained binary.
 
@@ -232,6 +236,12 @@ benchmark, but the order-of-magnitude difference reflects the design intent:
 a minimal Tokio/Axum server with embedded WASM vs. a full distributed storage system.
 
 ---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for build/test
+instructions and project conventions. For security issues, please follow
+[SECURITY.md](SECURITY.md) — do not open a public issue.
 
 ## License
 

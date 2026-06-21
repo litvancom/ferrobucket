@@ -1,8 +1,8 @@
 //! Breadcrumb SSR component — clickable prefix segments.
 //!
 //! Renders: `{bucket} / {segment} / {segment} /`
-//! Each segment is a clickable link (--accent text), current segment non-linked.
-//! Separator `/` in --text-muted. Full path in IBM Plex Mono 13px.
+//! Each segment is a clickable link (--dim text), current segment non-linked (--text, bold).
+//! Separator `/` in --faint. Full path in IBM Plex Mono 13px.
 //!
 //! Security invariant: SSR-only. No presign/hmac/secret/sigv4 code.
 
@@ -38,19 +38,20 @@ pub fn Breadcrumb(
         <nav
             aria-label="Breadcrumb"
             style="display:flex;align-items:center;flex-wrap:wrap;\
-                gap:4px;font-family:'IBM Plex Mono',monospace;font-size:13px;"
+                gap:5px;font-family:'IBM Plex Mono',monospace;font-size:13px;min-width:0;"
         >
             // Bucket (root segment) — always clickable unless no prefix
             {if segments.is_empty() {
                 view! {
-                    <span style="color:var(--text-muted);">{bucket_name}</span>
+                    <span style="color:var(--text);font-weight:600;padding:2px 3px;">{bucket_name}</span>
                 }.into_any()
             } else {
                 view! {
                     <a
                         href=bucket_href
-                        style="color:var(--accent);text-decoration:none;\
-                            transition:opacity 150ms ease;"
+                        style="border:none;background:transparent;color:var(--dim);\
+                            text-decoration:none;font-family:'IBM Plex Mono',monospace;\
+                            font-size:13px;font-weight:500;cursor:pointer;padding:2px 3px;"
                     >
                         {bucket_name}
                     </a>
@@ -68,19 +69,20 @@ pub fn Breadcrumb(
 
                 view! {
                     <>
-                        // Separator (--text-muted)
-                        <span style="color:var(--text-muted);padding:0 2px;">"/"</span>
-                        // Segment — linked unless last
+                        // Separator (--faint)
+                        <span style="color:var(--faint);font-size:13px;">"/"</span>
+                        // Segment — linked unless last (current = --text, bold)
                         {if is_last {
                             view! {
-                                <span style="color:var(--text-muted);">{seg_display}</span>
+                                <span style="color:var(--text);font-weight:600;padding:2px 3px;">{seg_display}</span>
                             }.into_any()
                         } else {
                             view! {
                                 <a
                                     href=seg_href
-                                    style="color:var(--accent);text-decoration:none;\
-                                        transition:opacity 150ms ease;"
+                                    style="border:none;background:transparent;color:var(--dim);\
+                                        text-decoration:none;font-family:'IBM Plex Mono',monospace;\
+                                        font-size:13px;font-weight:500;cursor:pointer;padding:2px 3px;"
                                 >
                                     {seg_display}
                                 </a>

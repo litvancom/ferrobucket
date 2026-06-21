@@ -93,79 +93,87 @@ pub fn CreateBucketModal() -> impl IntoView {
     };
 
     view! {
-        // "Create Bucket" trigger button (accent fill — UI-SPEC primary CTA)
+        // Scoped styles: input focus ring + button hover states (template style-focus/style-hover)
+        <style>
+            "#create-bucket-btn:hover{background:var(--accent-2)}\
+             .fb-create-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}\
+             .fb-create-cancel:hover{background:var(--hover)}\
+             .fb-create-confirm:hover{background:var(--accent-2)}"
+        </style>
+
+        // "Create bucket" trigger button (accent fill — primary CTA)
         <button
             on:click=handle_open
             id="create-bucket-btn"
-            style="background:var(--accent);border:1px solid var(--accent);\
-                color:#fff;border-radius:4px;padding:8px 16px;\
-                font-size:14px;cursor:pointer;font-weight:600;\
-                transition:background-color 150ms ease,border-color 150ms ease;"
+            style="display:flex;align-items:center;gap:7px;padding:8px 14px;border:none;border-radius:7px;\
+                background:var(--accent);color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer"
         >
             "Create Bucket"
         </button>
 
         // Modal
         <Show when=move || open.get()>
-            // Backdrop
+            // Overlay
             <div
-                style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:500;\
-                    display:flex;align-items:center;justify-content:center;"
+                style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;\
+                    justify-content:center;animation:overlayIn .15s ease;z-index:50"
                 on:click=handle_backdrop
             >
-                // Modal panel
+                // Dialog
                 <div
-                    style="background:var(--surface);border:1px solid var(--border);\
-                        border-radius:8px;padding:32px;max-width:440px;width:100%;\
-                        margin:0 16px;z-index:501;box-shadow:0 8px 32px rgba(0,0,0,0.5);"
+                    style="width:420px;max-width:92vw;background:var(--panel);border:1px solid var(--border-2);\
+                        border-radius:12px;box-shadow:var(--shadow);animation:modalIn .18s cubic-bezier(.2,.7,.3,1)"
                     on:click=|e| e.stop_propagation()
                 >
-                    <h2 style="font-size:16px;font-weight:600;color:var(--text);margin:0 0 16px 0;">
-                        "Create Bucket"
-                    </h2>
+                    <div style="padding:18px 20px 4px">
+                        <div style="font-size:16px;font-weight:600;letter-spacing:-.2px">
+                            "Create bucket"
+                        </div>
+                        <div style="font-size:12.5px;color:var(--faint);margin-top:3px">
+                            "Names must be lowercase, 3\u{2013}63 chars, DNS-compatible."
+                        </div>
+                    </div>
                     <form on:submit=handle_submit>
-                        <div style="margin-bottom:16px;">
+                        <div style="padding:16px 20px 20px">
                             <input
                                 type="text"
-                                placeholder="my-bucket"
+                                class="fb-create-input"
+                                placeholder="my-bucket-name"
+                                spellcheck="false"
                                 prop:value=move || name.get()
                                 on:input=move |e| set_name.set(event_target_value(&e))
                                 disabled=move || loading.get()
-                                style="width:100%;box-sizing:border-box;\
-                                    background:var(--bg);border:1px solid var(--border);\
-                                    color:var(--text);border-radius:4px;\
-                                    padding:8px 12px;font-size:14px;font-family:inherit;\
-                                    outline:none;\
-                                    transition:border-color 150ms ease;"
+                                style="width:100%;padding:10px 12px;border:1px solid var(--border-2);\
+                                    border-radius:8px;background:var(--bg);color:var(--text);\
+                                    font-family:'IBM Plex Mono',monospace;font-size:14px;outline:none"
                             />
                             // Inline error (friendly_create_error maps reserved-name → UI-SPEC copy)
                             <Show when=move || error.get().is_some()>
-                                <p style="margin:6px 0 0 0;font-size:12px;color:var(--destructive);">
+                                <div style="font-size:12px;color:var(--danger);margin-top:8px">
                                     {move || error.get().unwrap_or_default()}
-                                </p>
+                                </div>
                             </Show>
                         </div>
-                        <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <div style="display:flex;justify-content:flex-end;gap:9px;padding:14px 20px;border-top:1px solid var(--border)">
                             <button
                                 type="button"
+                                class="fb-create-cancel"
                                 on:click=handle_dismiss
                                 disabled=move || loading.get()
-                                style="background:none;border:1px solid var(--border);\
-                                    color:var(--text);border-radius:4px;padding:8px 16px;\
-                                    font-size:14px;cursor:pointer;\
-                                    transition:background-color 150ms ease,border-color 150ms ease;"
+                                style="padding:8px 15px;border:1px solid var(--border-2);border-radius:7px;\
+                                    background:transparent;color:var(--text);font-family:inherit;\
+                                    font-size:13px;font-weight:500;cursor:pointer"
                             >
                                 "Discard"
                             </button>
                             <button
                                 type="submit"
+                                class="fb-create-confirm"
                                 disabled=move || loading.get()
-                                style="background:var(--accent);border:1px solid var(--accent);\
-                                    color:#fff;border-radius:4px;padding:8px 16px;\
-                                    font-size:14px;cursor:pointer;font-weight:600;\
-                                    transition:background-color 150ms ease,border-color 150ms ease;"
+                                style="padding:8px 15px;border:none;border-radius:7px;background:var(--accent);\
+                                    color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer"
                             >
-                                {move || if loading.get() { "Creating\u{2026}" } else { "Create" }}
+                                {move || if loading.get() { "Creating\u{2026}" } else { "Create bucket" }}
                             </button>
                         </div>
                     </form>

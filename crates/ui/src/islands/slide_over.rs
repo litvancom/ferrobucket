@@ -36,6 +36,60 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
+/// Render a single metadata label/value row inside the bordered list.
+/// `copyable` rows get a ghost copy icon-button that writes the value to the clipboard.
+fn meta_row(label: &'static str, value: String, copyable: bool) -> impl IntoView {
+    // StoredValue is Copy, so the click handler stays `Fn` (required by <Show> children).
+    let copy_value = StoredValue::new(value.clone());
+    let on_copy = move |_| {
+        let _ = copy_value;
+        #[cfg(feature = "hydrate")]
+        {
+            if let Some(window) = web_sys::window() {
+                let clipboard = window.navigator().clipboard();
+                let _ = clipboard.write_text(&copy_value.get_value());
+            }
+        }
+    };
+    view! {
+        <div
+            style="display:flex;align-items:flex-start;gap:12px;\
+                padding:10px 13px;border-bottom:1px solid var(--border);"
+        >
+            <div style="font-size:12px;color:var(--faint);width:96px;flex:none;">
+                {label}
+            </div>
+            <div
+                style="font-family:'IBM Plex Mono',monospace;font-size:12px;\
+                    color:var(--text);word-break:break-all;flex:1;"
+            >
+                {value}
+            </div>
+            <Show when=move || copyable>
+                <button
+                    on:click=on_copy
+                    class="so-copy-meta"
+                    style="flex:none;width:24px;height:24px;display:flex;\
+                        align-items:center;justify-content:center;border:none;\
+                        border-radius:5px;background:transparent;color:var(--faint);\
+                        cursor:pointer;transition:background-color 150ms ease,color 150ms ease;"
+                >
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                        <rect
+                            x="5" y="5" width="8" height="8" rx="1.4"
+                            stroke="currentColor" stroke-width="1.2"
+                        />
+                        <path
+                            d="M3 11V4.4C3 3.6 3.6 3 4.4 3H11"
+                            stroke="currentColor" stroke-width="1.2"
+                        />
+                    </svg>
+                </button>
+            </Show>
+        </div>
+    }
+}
+
 /// SlideOver island — right-side panel for object detail.
 ///
 /// Props (all serializable):
@@ -142,6 +196,15 @@ pub fn SlideOver(bucket: String, object_key: String) -> impl IntoView {
     };
 
     view! {
+        // Scoped hover styles (template uses style-hover="..." — reproduced via CSS classes).
+        <style>
+            ".so-close:hover{background:var(--hover);color:var(--text)}\
+             .so-copy-meta:hover{background:var(--hover);color:var(--text)}\
+             .so-gen:hover{border-color:var(--accent-bd);color:var(--text)}\
+             .so-download:hover{border-color:var(--accent-bd);background:var(--surface-2)}\
+             .so-delete:hover{background:var(--danger);color:#fff}"
+        </style>
+
         // Trigger: clicking the object key name opens the slide-over.
         <button
             on:click=handle_open
@@ -159,62 +222,82 @@ pub fn SlideOver(bucket: String, object_key: String) -> impl IntoView {
         </button>
 
         <Show when=move || open.get()>
-            // Backdrop (closes panel on click outside)
+            // Backdrop scrim (closes panel on click outside)
             <div
-                style="position:fixed;inset:0;z-index:400;"
+                style="position:fixed;inset:0;background:rgba(0,0,0,.42);\
+                    animation:overlayIn .15s ease;z-index:40;"
                 on:click=handle_backdrop
             />
 
-            // Slide-over panel: 400px, right-anchored, full height (UI-SPEC Screen 3).
+            // Slide-over panel: 420px, right-anchored, full height.
             <div
-                style="position:fixed;top:0;right:0;bottom:0;width:400px;\
-                    background:var(--surface);border-left:1px solid var(--border);\
-                    z-index:401;display:flex;flex-direction:column;\
-                    box-shadow:-4px 0 24px rgba(0,0,0,0.4);"
+                style="position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;\
+                    background:var(--panel);border-left:1px solid var(--border);\
+                    box-shadow:var(--shadow);display:flex;flex-direction:column;\
+                    animation:panelIn .2s cubic-bezier(.2,.7,.3,1);z-index:41;"
                 on:click=|e| e.stop_propagation()
             >
-                // Header
+                // Header: icon tile + mono basename + type + close button
                 <div
-                    style="display:flex;align-items:center;justify-content:space-between;\
-                        padding:24px;border-bottom:1px solid var(--border);flex-shrink:0;"
+                    style="display:flex;align-items:flex-start;gap:10px;\
+                        padding:16px 18px;border-bottom:1px solid var(--border);flex-shrink:0;"
                 >
-                    <h2
-                        style="font-size:16px;font-weight:600;color:var(--text);\
-                            margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    // Icon tile (file icon)
+                    <div
+                        style="width:30px;height:30px;flex:none;border-radius:7px;\
+                            background:var(--surface-2);display:flex;align-items:center;\
+                            justify-content:center;color:var(--accent);"
                     >
-                        {move || title_sv.get_value()}
-                    </h2>
-                    // Close button — 36px touch target (UI-SPEC)
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path
+                                d="M4 2h5l3 3v9H4z"
+                                stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" stroke-linejoin="round"
+                            />
+                            <path
+                                d="M9 2v3h3"
+                                stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" stroke-linejoin="round"
+                            />
+                        </svg>
+                    </div>
+                    <div style="min-width:0;flex:1;">
+                        <div
+                            style="font-family:'IBM Plex Mono',monospace;font-size:13px;\
+                                font-weight:600;word-break:break-all;line-height:1.4;\
+                                color:var(--text);"
+                        >
+                            {move || title_sv.get_value()}
+                        </div>
+                        <div style="font-size:11.5px;color:var(--faint);margin-top:2px;">
+                            "Object"
+                        </div>
+                    </div>
+                    // Close button (ghost icon-button)
                     <button
                         aria-label="Close panel"
                         on:click=handle_close
-                        style="background:none;border:none;cursor:pointer;\
-                            color:var(--text-muted);width:36px;height:36px;\
-                            display:flex;align-items:center;justify-content:center;\
-                            border-radius:4px;flex-shrink:0;\
-                            transition:background-color 150ms ease,color 150ms ease;"
+                        class="so-close"
+                        style="width:28px;height:28px;flex:none;display:flex;\
+                            align-items:center;justify-content:center;border:none;\
+                            border-radius:6px;background:transparent;color:var(--faint);\
+                            cursor:pointer;transition:background-color 150ms ease,color 150ms ease;"
                     >
-                        // X icon (Lucide)
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16" height="16"
-                            viewBox="0 0 24 24"
-                            fill="none" stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round" stroke-linejoin="round"
-                        >
-                            <line x1="18" y1="6" x2="6" y2="18"/>
-                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <path
+                                d="M4 4l8 8M12 4l-8 8"
+                                stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+                            />
                         </svg>
                     </button>
                 </div>
 
-                // Body: loading → error → metadata + actions + preview
-                <div style="flex:1;overflow-y:auto;padding:24px;">
+                // Body: loading → error → preview + metadata + presigned URL
+                <div style="flex:1;overflow-y:auto;padding:18px;">
                     <Show when=move || loading.get()>
                         <p
                             style="font-size:13px;font-family:'IBM Plex Mono',monospace;\
-                                color:var(--text-muted);margin:0;"
+                                color:var(--faint);margin:0;"
                         >
                             "Loading\u{2026}"
                         </p>
@@ -226,7 +309,7 @@ pub fn SlideOver(bucket: String, object_key: String) -> impl IntoView {
                             None => view! {
                                 <p
                                     style="font-size:13px;font-family:'IBM Plex Mono',\
-                                        monospace;color:var(--text-muted);margin:0;"
+                                        monospace;color:var(--faint);margin:0;"
                                 >
                                     "Loading\u{2026}"
                                 </p>
@@ -242,7 +325,7 @@ pub fn SlideOver(bucket: String, object_key: String) -> impl IntoView {
                                 }.into_any()
                             },
 
-                            // Success: render metadata list + actions + inline preview
+                            // Success: render preview card + metadata list + presigned URL
                             Some(Ok(ref detail)) => {
                                 let d = detail.clone();
                                 let size_label = format!(
@@ -250,221 +333,28 @@ pub fn SlideOver(bucket: String, object_key: String) -> impl IntoView {
                                     fmt_size(d.size),
                                     d.size
                                 );
-                                let dl_bkt = bucket_sv.get_value();
-                                let dl_key = object_key_sv.get_value();
                                 let prev_bkt = bucket_sv.get_value();
                                 let prev_key = object_key_sv.get_value();
                                 let prev_ct = d.content_type.clone();
                                 let prev_size = d.size;
+                                let row_key = d.key.clone();
+                                let row_ct = d.content_type.clone();
+                                let row_etag = d.etag.clone();
+                                // Date + minute ("2026-06-20 18:10") to match the design template.
+                                let row_lm = d
+                                    .last_modified
+                                    .get(..16)
+                                    .map(|s| s.replace('T', " "))
+                                    .unwrap_or_else(|| d.last_modified.clone());
 
                                 view! {
                                     <div>
-                                        // Metadata section (UI-SPEC Screen 3, IBM Plex Mono 13px)
-                                        <div style="margin-bottom:24px;">
-                                            // Full key
-                                            <div style="margin-bottom:12px;">
-                                                <div
-                                                    style="font-size:12px;color:var(--text-muted);\
-                                                        margin-bottom:4px;"
-                                                >
-                                                    "Key"
-                                                </div>
-                                                <div
-                                                    style="font-size:13px;\
-                                                        font-family:'IBM Plex Mono',monospace;\
-                                                        color:var(--text);word-break:break-all;"
-                                                >
-                                                    {d.key.clone()}
-                                                </div>
-                                            </div>
-                                            // Size (human-readable + bytes)
-                                            <div style="margin-bottom:12px;">
-                                                <div
-                                                    style="font-size:12px;color:var(--text-muted);\
-                                                        margin-bottom:4px;"
-                                                >
-                                                    "Size"
-                                                </div>
-                                                <div
-                                                    style="font-size:13px;\
-                                                        font-family:'IBM Plex Mono',monospace;\
-                                                        color:var(--text);"
-                                                >
-                                                    {size_label}
-                                                </div>
-                                            </div>
-                                            // Content-Type
-                                            <div style="margin-bottom:12px;">
-                                                <div
-                                                    style="font-size:12px;color:var(--text-muted);\
-                                                        margin-bottom:4px;"
-                                                >
-                                                    "Content-Type"
-                                                </div>
-                                                <div
-                                                    style="font-size:13px;\
-                                                        font-family:'IBM Plex Mono',monospace;\
-                                                        color:var(--text);"
-                                                >
-                                                    {d.content_type.clone()}
-                                                </div>
-                                            </div>
-                                            // ETag
-                                            <div style="margin-bottom:12px;">
-                                                <div
-                                                    style="font-size:12px;color:var(--text-muted);\
-                                                        margin-bottom:4px;"
-                                                >
-                                                    "ETag"
-                                                </div>
-                                                <div
-                                                    style="font-size:13px;\
-                                                        font-family:'IBM Plex Mono',monospace;\
-                                                        color:var(--text);word-break:break-all;"
-                                                >
-                                                    {d.etag.clone()}
-                                                </div>
-                                            </div>
-                                            // Last Modified (RFC3339)
-                                            <div style="margin-bottom:12px;">
-                                                <div
-                                                    style="font-size:12px;color:var(--text-muted);\
-                                                        margin-bottom:4px;"
-                                                >
-                                                    "Last Modified"
-                                                </div>
-                                                <div
-                                                    style="font-size:13px;\
-                                                        font-family:'IBM Plex Mono',monospace;\
-                                                        color:var(--text);"
-                                                >
-                                                    {d.last_modified.clone()}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        // Actions (UI-SPEC Screen 3): Download | Copy Presigned URL | Delete
+                                        // Preview card (template: bordered card first)
                                         <div
-                                            style="display:flex;flex-direction:column;\
-                                                gap:8px;margin-bottom:24px;"
+                                            style="border:1px solid var(--border);border-radius:9px;\
+                                                overflow:hidden;margin-bottom:18px;\
+                                                background:var(--surface);padding:14px;"
                                         >
-                                            // Download (ghost button — link, browser download)
-                                            <a
-                                                href=format!("/ui/download/{dl_bkt}/{dl_key}")
-                                                download=""
-                                                style="display:inline-flex;align-items:center;\
-                                                    gap:6px;background:none;\
-                                                    border:1px solid var(--border);\
-                                                    color:var(--text);border-radius:4px;\
-                                                    padding:8px 12px;font-size:14px;\
-                                                    text-decoration:none;cursor:pointer;\
-                                                    transition:background-color 150ms ease,\
-                                                    border-color 150ms ease;"
-                                            >
-                                                // Download icon (Lucide)
-                                                <svg
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    width="14" height="14"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none" stroke="currentColor"
-                                                    stroke-width="2"
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    aria-hidden="true"
-                                                >
-                                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                                    <polyline points="7 10 12 15 17 10"/>
-                                                    <line x1="12" y1="15" x2="12" y2="3"/>
-                                                </svg>
-                                                "Download"
-                                            </a>
-
-                                            // Copy Presigned URL (calls presign_fn server-side,
-                                            // URL-string-only received in WASM — T-04-09A)
-                                            <div>
-                                                <button
-                                                    on:click=handle_presign
-                                                    disabled=move || presigning.get()
-                                                    style="display:inline-flex;align-items:center;\
-                                                        gap:6px;background:none;\
-                                                        border:1px solid var(--border);\
-                                                        color:var(--text);border-radius:4px;\
-                                                        padding:8px 12px;font-size:14px;\
-                                                        cursor:pointer;width:100%;\
-                                                        transition:background-color 150ms ease,\
-                                                        border-color 150ms ease;"
-                                                >
-                                                    // Link icon (Lucide)
-                                                    <svg
-                                                        xmlns="http://www.w3.org/2000/svg"
-                                                        width="14" height="14"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none" stroke="currentColor"
-                                                        stroke-width="2"
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        aria-hidden="true"
-                                                    >
-                                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3\
-                                                            a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3\
-                                                            a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                                                    </svg>
-                                                    {move || if presigning.get() {
-                                                        "Copying\u{2026}"
-                                                    } else {
-                                                        "Copy Presigned URL"
-                                                    }}
-                                                </button>
-                                                // Affordance: "Presigned URL copied (expires in 15 min)"
-                                                // (UI-SPEC Copywriting Contract, --warn color)
-                                                <Show when=move || presign_copied.get()>
-                                                    <p
-                                                        style="font-size:12px;color:var(--warn);\
-                                                            margin:6px 0 0 0;"
-                                                    >
-                                                        "Presigned URL copied (expires in 15 min)"
-                                                    </p>
-                                                </Show>
-                                            </div>
-
-                                            // Delete (ghost, destructive color — opens inline confirm)
-                                            <button
-                                                on:click=handle_delete_open
-                                                style="display:inline-flex;align-items:center;\
-                                                    gap:6px;background:none;\
-                                                    border:1px solid var(--danger-bd);\
-                                                    color:var(--danger);border-radius:4px;\
-                                                    padding:8px 12px;font-size:14px;\
-                                                    cursor:pointer;\
-                                                    transition:background-color 150ms ease,\
-                                                    border-color 150ms ease;"
-                                            >
-                                                // Trash icon (Lucide)
-                                                <svg
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    width="14" height="14"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none" stroke="currentColor"
-                                                    stroke-width="2"
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    aria-hidden="true"
-                                                >
-                                                    <polyline points="3 6 5 6 21 6"/>
-                                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8\
-                                                        a2 2 0 0 1-2-2L5 6"/>
-                                                    <path d="M10 11v6"/>
-                                                    <path d="M14 11v6"/>
-                                                    <path d="M9 6V4a1 1 0 0 1 1-1h4\
-                                                        a1 1 0 0 1 1 1v2"/>
-                                                </svg>
-                                                "Delete"
-                                            </button>
-                                        </div>
-
-                                        // Inline preview (UI-SPEC Screen 3, size-gated — T-04-09C)
-                                        <div style="border-top:1px solid var(--border);padding-top:16px;">
                                             <crate::components::InlinePreview
                                                 bucket=prev_bkt
                                                 key=prev_key
@@ -472,60 +362,230 @@ pub fn SlideOver(bucket: String, object_key: String) -> impl IntoView {
                                                 size=prev_size
                                             />
                                         </div>
+
+                                        // Metadata section label
+                                        <div
+                                            style="font-size:11px;font-weight:600;\
+                                                letter-spacing:.4px;color:var(--faint);\
+                                                text-transform:uppercase;margin-bottom:10px;"
+                                        >
+                                            "Metadata"
+                                        </div>
+                                        // Bordered list of label/value rows
+                                        <div
+                                            style="border:1px solid var(--border);border-radius:9px;\
+                                                background:var(--surface);overflow:hidden;"
+                                        >
+                                            {meta_row("Key", row_key, true)}
+                                            {meta_row("Size", size_label, false)}
+                                            {meta_row("Content-Type", row_ct, false)}
+                                            {meta_row("ETag", row_etag, true)}
+                                            {meta_row("Last Modified", row_lm, false)}
+                                        </div>
+
+                                        // Presigned URL section label
+                                        <div
+                                            style="font-size:11px;font-weight:600;\
+                                                letter-spacing:.4px;color:var(--faint);\
+                                                text-transform:uppercase;margin:18px 0 10px;"
+                                        >
+                                            "Presigned URL"
+                                        </div>
+                                        // Either the copied affordance or the dashed generate button.
+                                        <Show
+                                            when=move || presign_copied.get()
+                                            fallback=move || view! {
+                                                <button
+                                                    on:click=handle_presign
+                                                    disabled=move || presigning.get()
+                                                    class="so-gen"
+                                                    style="width:100%;display:flex;align-items:center;\
+                                                        justify-content:center;gap:7px;padding:9px;\
+                                                        border:1px dashed var(--border-2);\
+                                                        border-radius:7px;background:transparent;\
+                                                        color:var(--dim);font-family:inherit;\
+                                                        font-size:12.5px;font-weight:500;cursor:pointer;\
+                                                        transition:border-color 150ms ease,color 150ms ease;"
+                                                >
+                                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                        <path
+                                                            d="M6.5 9.5 9.5 6.5M7 5l1.3-1.3a2.5 2.5 0 0 1 3.5 3.5L10.5 8.5M9 11l-1.3 1.3a2.5 2.5 0 0 1-3.5-3.5L5.5 7.5"
+                                                            stroke="currentColor" stroke-width="1.2"
+                                                            stroke-linecap="round"
+                                                        />
+                                                    </svg>
+                                                    {move || if presigning.get() {
+                                                        "Generating\u{2026}"
+                                                    } else {
+                                                        "Generate presigned URL"
+                                                    }}
+                                                </button>
+                                            }
+                                        >
+                                            <div>
+                                                // Accent copy field (URL is in clipboard; show success row)
+                                                <div
+                                                    style="display:flex;align-items:center;gap:6px;\
+                                                        border:1px solid var(--accent-bd);border-radius:7px;\
+                                                        background:var(--bg);padding:4px 4px 4px 11px;"
+                                                >
+                                                    <span
+                                                        style="flex:1;min-width:0;\
+                                                            font-family:'IBM Plex Mono',monospace;\
+                                                            font-size:11.5px;color:var(--dim);\
+                                                            white-space:nowrap;overflow:hidden;\
+                                                            text-overflow:ellipsis;"
+                                                    >
+                                                        "Presigned URL copied to clipboard"
+                                                    </span>
+                                                    <button
+                                                        on:click=handle_presign
+                                                        style="flex:none;display:flex;align-items:center;\
+                                                            gap:6px;padding:6px 10px;border:none;\
+                                                            border-radius:5px;background:var(--accent);\
+                                                            color:#fff;font-family:inherit;font-size:12px;\
+                                                            font-weight:600;cursor:pointer;"
+                                                    >
+                                                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                                            <rect
+                                                                x="5" y="5" width="8" height="8" rx="1.4"
+                                                                stroke="#fff" stroke-width="1.3"
+                                                            />
+                                                            <path
+                                                                d="M3 11V4.4C3 3.6 3.6 3 4.4 3H11"
+                                                                stroke="#fff" stroke-width="1.3"
+                                                            />
+                                                        </svg>
+                                                        "Copy"
+                                                    </button>
+                                                </div>
+                                                // Expiry warning note
+                                                <div
+                                                    style="font-size:11.5px;color:var(--warn);\
+                                                        margin-top:7px;display:flex;align-items:center;gap:6px;"
+                                                >
+                                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                                        <circle
+                                                            cx="8" cy="8" r="6"
+                                                            stroke="currentColor" stroke-width="1.2"
+                                                        />
+                                                        <path
+                                                            d="M8 4.8V8l2.2 1.4"
+                                                            stroke="currentColor" stroke-width="1.2"
+                                                            stroke-linecap="round"
+                                                        />
+                                                    </svg>
+                                                    "Expires in 15 minutes"
+                                                </div>
+                                            </div>
+                                        </Show>
                                     </div>
                                 }.into_any()
                             }
                         }}
                     </Show>
                 </div>
+
+                // Footer: Download (secondary) + Delete (danger tinted)
+                <div
+                    style="display:flex;gap:9px;padding:14px 18px;\
+                        border-top:1px solid var(--border);flex-shrink:0;"
+                >
+                    // Download (secondary button — link, browser download)
+                    <a
+                        href=move || {
+                            let b = bucket_sv.get_value();
+                            let k = object_key_sv.get_value();
+                            format!("/ui/download/{b}/{k}")
+                        }
+                        download=""
+                        class="so-download"
+                        style="flex:1;display:flex;align-items:center;justify-content:center;\
+                            gap:7px;padding:9px;border:1px solid var(--border-2);\
+                            border-radius:7px;background:var(--surface);color:var(--text);\
+                            font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;\
+                            text-decoration:none;\
+                            transition:background-color 150ms ease,border-color 150ms ease;"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <path
+                                d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13h10"
+                                stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" stroke-linejoin="round"
+                            />
+                        </svg>
+                        "Download"
+                    </a>
+                    // Delete (danger tinted — opens inline confirm)
+                    <button
+                        on:click=handle_delete_open
+                        class="so-delete"
+                        style="display:flex;align-items:center;justify-content:center;\
+                            gap:7px;padding:9px 16px;border:1px solid var(--danger-bd);\
+                            border-radius:7px;background:var(--danger-dim);color:var(--danger);\
+                            font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;\
+                            transition:background-color 150ms ease,color 150ms ease;"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <path
+                                d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5"
+                                stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" stroke-linejoin="round"
+                            />
+                        </svg>
+                        "Delete"
+                    </button>
+                </div>
             </div>
 
             // Inline delete-confirmation modal (inside the island — T-04-09D: single hydration root).
             <Show when=move || delete_confirm_open.get()>
                 <div
-                    style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:600;\
-                        display:flex;align-items:center;justify-content:center;"
+                    style="position:fixed;inset:0;background:rgba(0,0,0,.45);\
+                        display:flex;align-items:center;justify-content:center;\
+                        animation:overlayIn .15s ease;z-index:600;"
                     on:click=handle_delete_dismiss
                 >
                     <div
-                        style="background:var(--surface);border:1px solid var(--border);\
-                            border-radius:8px;padding:32px;max-width:440px;width:100%;\
-                            margin:0 16px;z-index:601;\
-                            box-shadow:0 8px 32px rgba(0,0,0,0.5);"
+                        style="width:420px;max-width:92vw;background:var(--panel);\
+                            border:1px solid var(--border-2);border-radius:12px;\
+                            box-shadow:var(--shadow);margin:0 16px;z-index:601;\
+                            animation:modalIn .18s cubic-bezier(.2,.7,.3,1);"
                         on:click=|e| e.stop_propagation()
                     >
-                        <h2
-                            style="font-size:16px;font-weight:600;color:var(--text);\
-                                margin:0 0 12px 0;line-height:1.3;"
+                        <div style="padding:18px 20px 4px;">
+                            <div
+                                style="font-size:16px;font-weight:600;letter-spacing:-.2px;\
+                                    color:var(--text);line-height:1.3;"
+                            >
+                                {move || format!("Delete \"{}\"?", title_sv.get_value())}
+                            </div>
+                            <div
+                                style="font-size:12.5px;color:var(--faint);\
+                                    margin-top:3px;line-height:1.5;"
+                            >
+                                "This action cannot be undone."
+                            </div>
+                        </div>
+                        <div
+                            style="display:flex;justify-content:flex-end;gap:9px;\
+                                padding:14px 20px;border-top:1px solid var(--border);margin-top:14px;"
                         >
-                            {move || format!("Delete \"{}\"?", title_sv.get_value())}
-                        </h2>
-                        <p
-                            style="font-size:14px;color:var(--text-muted);\
-                                margin:0 0 24px 0;line-height:1.5;"
-                        >
-                            "This action cannot be undone."
-                        </p>
-                        <div style="display:flex;gap:8px;justify-content:flex-end;">
                             <button
                                 on:click=handle_delete_dismiss
                                 disabled=move || deleting.get()
-                                style="background:none;border:1px solid var(--border);\
-                                    color:var(--text);border-radius:4px;padding:8px 16px;\
-                                    font-size:14px;cursor:pointer;\
-                                    transition:background-color 150ms ease,\
-                                    border-color 150ms ease;"
+                                style="padding:8px 15px;border:1px solid var(--border-2);\
+                                    border-radius:7px;background:transparent;color:var(--text);\
+                                    font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;"
                             >
                                 "Keep File"
                             </button>
                             <button
                                 on:click=handle_delete_confirm
                                 disabled=move || deleting.get()
-                                style="background:var(--danger);border:1px solid var(--danger);\
-                                    color:#fff;border-radius:4px;padding:8px 16px;\
-                                    font-size:14px;cursor:pointer;font-weight:600;\
-                                    transition:background-color 150ms ease,\
-                                    border-color 150ms ease;"
+                                style="padding:8px 15px;border:none;border-radius:7px;\
+                                    background:var(--danger);color:#fff;font-family:inherit;\
+                                    font-size:13px;font-weight:600;cursor:pointer;"
                             >
                                 {move || if deleting.get() { "Deleting\u{2026}" } else { "Delete Object" }}
                             </button>

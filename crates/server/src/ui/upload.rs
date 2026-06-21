@@ -14,7 +14,7 @@
 use axum::{
     body::Body,
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use ferrobucket_storage::Storage;
@@ -22,6 +22,64 @@ use futures::StreamExt;
 use serde::Deserialize;
 
 use crate::ui::AppState;
+
+/// Map a key's file extension to a MIME type (common web/object types).
+/// Used so uploads get a meaningful Content-Type even when the client sends none
+/// (e.g. the multipart `create` request has no body) — without this, everything
+/// is stored as `application/octet-stream` and the UI can't preview images/text.
+fn ext_mime(key: &str) -> Option<&'static str> {
+    let ext = key.rsplit('.').next()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        "txt" => "text/plain",
+        "md" => "text/markdown",
+        "csv" => "text/csv",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" => "application/javascript",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "yaml" | "yml" => "application/yaml",
+        "toml" => "application/toml",
+        "pdf" => "application/pdf",
+        "wasm" => "application/wasm",
+        "woff2" => "font/woff2",
+        "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        "zip" => "application/zip",
+        "tar" => "application/x-tar",
+        "gz" => "application/gzip",
+        _ => return None,
+    })
+}
+
+/// Resolve the Content-Type to store for an upload.
+///
+/// Prefers the request `Content-Type` header when it's meaningful (browsers set it
+/// from the File's type on XHR/fetch), then falls back to sniffing the key's
+/// extension. Returns `None` only when neither yields anything (storage then uses
+/// its `application/octet-stream` default).
+fn resolve_content_type(key: &str, headers: &HeaderMap) -> Option<String> {
+    if let Some(ct) = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) {
+        let ct = ct.split(';').next().unwrap_or(ct).trim();
+        // Skip generic/non-file defaults that carry no real type info (octet-stream,
+        // and the form-urlencoded default some CLIs send) so the extension sniff wins.
+        let generic = ct.is_empty()
+            || ct == "application/octet-stream"
+            || ct == "application/x-www-form-urlencoded";
+        if !generic {
+            return Some(ct.to_string());
+        }
+    }
+    ext_mime(key).map(|s| s.to_string())
+}
 
 /// Query parameters for the upload endpoint.
 ///
@@ -55,13 +113,15 @@ pub async fn upload_handler(
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
     State(state): State<AppState>,
+    headers: HeaderMap,
     body: Body,
 ) -> Response {
     match &params.action {
         // ── 1. Create multipart upload ────────────────────────────────────────
         Some(action) if action == "create" => {
-            // Derive content-type from the query or leave None; can be extended later.
-            let content_type: Option<String> = None;
+            // No body on `create`, so sniff the content-type from the key extension
+            // (resolve_content_type falls back to that when no header is present).
+            let content_type = resolve_content_type(&key, &headers);
             match state.storage.create_multipart_upload(&bucket, &key, content_type).await {
                 Ok(upload_id) => (StatusCode::OK, upload_id).into_response(),
                 Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
@@ -124,11 +184,10 @@ pub async fn upload_handler(
 
         // ── 5. Small-file single PUT ──────────────────────────────────────────
         _ => {
-            // Extract Content-Type from request headers (passed through the State-less body param).
-            // For the small-file path the browser sets it automatically on XHR.
-            // We don't have access to headers here; pass None and FsStorage will use
-            // application/octet-stream as the fallback (same as S3 adapter).
-            let content_type: Option<String> = None;
+            // Use the request Content-Type (browsers set it from the File's type on
+            // XHR), falling back to an extension sniff. Without this, UI uploads were
+            // stored as application/octet-stream and the UI couldn't preview them.
+            let content_type = resolve_content_type(&key, &headers);
 
             // Adapt axum Body → io::Result<Bytes> stream.
             let stream = body.into_data_stream().map(|r| {

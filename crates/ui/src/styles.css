@@ -1,56 +1,104 @@
 /* ferrobucket Web UI — CSS Variable Palette
- * Light theme on :root (no-JS / first-paint default); dark override via [data-theme="dark"].
- * Source: UI-SPEC.md CSS Variable Reference, REQ-ui-theming, DEC-ui-theme-default.
- * Accent: #2563eb (light) / #4c97f8 (dark).
+ * Source of truth for the design token palette + globals.
+ * LIGHT is the default (:root). DARK is the :root[data-theme="dark"] override
+ * (higher specificity so it wins regardless of source order).
+ * Source: S3 Browser.dc.html design canvas (see DESIGN-SPEC.md).
  * Fonts: IBM Plex Sans (body/UI), IBM Plex Mono (keys/values/ETags/timestamps).
  */
 
-:root {
-  /* Backgrounds — light palette (first-paint default, no attribute needed) */
-  --bg: #ffffff;
-  --surface: #f5f5f5;
-  --surface-raised: #ebebeb;
-  --mono-bg: #f0f0f0;
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --bg: #0a0c0f;
+  --panel: #0d1014;
+  --surface: #13171c;
+  --surface-2: #181d24;
+  --hover: #1b212a;
 
   /* Borders */
-  --border: #e0e0e0;
+  --border: #1e242c;
+  --border-2: #2a323c;
 
   /* Text */
-  --text: #111111;
-  --text-muted: #666666;
+  --text: #e7edf4;
+  --dim: #97a2af;
+  --faint: #646f7c;
 
-  /* Accent (10% — reserved for primary CTAs, focus rings, active states) */
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-
-  /* Semantic */
-  --destructive: #dc2626;
-  --destructive-hover: #b91c1c;
-  --success: #16a34a;
-  --warning: #d97706;
-}
-
-[data-theme="dark"] {
-  --bg: #0f0f0f;
-  --surface: #1a1a1a;
-  --surface-raised: #222222;
-  --mono-bg: #161616;
-  --border: #2a2a2a;
-  --text: #e8e8e8;
-  --text-muted: #888888;
+  /* Accent */
   --accent: #4c97f8;
-  --accent-hover: #6aaeff;
-  --destructive: #e05252;
-  --destructive-hover: #ef6b6b;
-  --success: #4ade80;
-  --warning: #f59e0b;
+  --accent-2: #74b1ff;
+  --accent-dim: rgba(76, 151, 248, .14);
+  --accent-bd: rgba(76, 151, 248, .4);
+
+  /* Danger */
+  --danger: #f0726f;
+  --danger-dim: rgba(240, 114, 111, .13);
+  --danger-bd: rgba(240, 114, 111, .4);
+
+  /* Status */
+  --success: #42b95a;
+  --warn: #d8a33c;
+
+  /* Shadows */
+  --shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  --shadow-sm: 0 4px 16px rgba(0, 0, 0, .4);
+
+  /* ── Legacy aliases (back-compat for un-migrated components) ───────────── */
+  --surface-raised: var(--surface-2);
+  --mono-bg: var(--surface-2);
+  --text-muted: var(--dim);
+  --accent-hover: var(--accent-2);
+  --destructive: var(--danger);
+  --destructive-hover: var(--danger);
+  --warning: var(--warn);
 }
 
-/* ── Typography ─────────────────────────────────────────────────────────────── */
-/* 4 sizes only: 12px (label) / 13px (mono) / 14px (body) / 16px (heading).
- * 2 weights for IBM Plex Sans: 400 (regular) + 600 (semibold). Mono: 400 only.
- * Source: UI-SPEC.md Typography section.
- */
+:root {
+  /* Surfaces */
+  --bg: #f5f7f9;
+  --panel: #edf0f3;
+  --surface: #ffffff;
+  --surface-2: #f3f6f8;
+  --hover: #eef2f5;
+
+  /* Borders */
+  --border: #e1e6eb;
+  --border-2: #d2d9e0;
+
+  /* Text */
+  --text: #1b2027;
+  --dim: #586069;
+  --faint: #8b939c;
+
+  /* Accent */
+  --accent: #0a66d6;
+  --accent-2: #0852ad;
+  --accent-dim: rgba(10, 102, 214, .08);
+  --accent-bd: rgba(10, 102, 214, .32);
+
+  /* Danger */
+  --danger: #cf2230;
+  --danger-dim: rgba(207, 34, 48, .07);
+  --danger-bd: rgba(207, 34, 48, .3);
+
+  /* Status */
+  --success: #1a7f37;
+  --warn: #9a6700;
+
+  /* Shadows */
+  --shadow: 0 18px 50px rgba(120, 130, 145, .28);
+  --shadow-sm: 0 4px 16px rgba(120, 130, 145, .18);
+
+  /* ── Legacy aliases (back-compat for un-migrated components) ───────────── */
+  --surface-raised: var(--surface-2);
+  --mono-bg: var(--surface-2);
+  --text-muted: var(--dim);
+  --accent-hover: var(--accent-2);
+  --destructive: var(--danger);
+  --destructive-hover: var(--danger);
+  --warning: var(--warn);
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -59,20 +107,76 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.5;
+  /* Full-height chain so the flex shell (sidebar + main) fills the viewport. */
+  height: 100%;
 }
 
-/* ── Layout shell ────────────────────────────────────────────────────────────── */
-/* Filled by Plan 03 with sidebar, main, and toast stack. */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-dim);
+}
+
+/* ── Keyframes ──────────────────────────────────────────────────────────── */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+@keyframes toastIn {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes panelIn {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modalIn {
+  from { transform: translateY(8px) scale(.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Layout shell ───────────────────────────────────────────────────────── */
+/* Retained for components still referencing these helpers; the shell agent
+ * may inline them. */
 
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  transform: translateZ(0);
 }
 
 .main-content {
@@ -82,10 +186,15 @@ html, body {
   overflow-y: auto;
 }
 
-/* ── Transitions ─────────────────────────────────────────────────────────────── */
-/* 150ms ease on color/background/border transitions (UI-SPEC Interaction States). */
+/* ── Transitions ────────────────────────────────────────────────────────── */
 
 button, a, [role="button"] {
   transition: background-color 150ms ease, color 150ms ease,
               border-color 150ms ease, opacity 150ms ease;
+}
+
+/* Prefix-filter search box: accent focus ring (replaces inline JS focus handlers). */
+.fb-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }

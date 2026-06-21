@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 use leptos_router::{
-    components::{Outlet, ParentRoute, Route, Router, Routes},
+    components::{Route, Router, Routes},
     path,
 };
 
@@ -10,50 +10,73 @@ use crate::pages::{BucketListPage, ObjectBrowserPage, SettingsPage};
 
 /// Root Leptos application component.
 ///
-/// Defines the router with all routes nested under the `/ui` parent prefix
-/// (D-01: UI served at `/ui` on the same port as the S3 API).
+/// Routes are FLAT and each route view is a dedicated layout component that
+/// instantiates its page **directly** (`<BucketListPage/>`), not through a
+/// parent-route `<Outlet/>` nor through `children`/`AnyView`.
 ///
-/// RESEARCH A2: defining all routes inside `<ParentRoute path=path!("/ui")>`
-/// causes `generate_route_list(App)` to emit paths starting with `/ui/…`,
-/// so the S3 fallback never sees `/ui/*` requests. Verified by Wave-0 compile check.
+/// WHY (islands hydration): with `hydrate_islands()`, `#[island]` components only
+/// hydrate when they live inside a directly-instantiated component in the route
+/// view (the same way `<Sidebar/>`'s islands hydrate). Islands reached through
+/// type-erased rendering — a parent-route `<Outlet/>` or a `children: Children`
+/// (`Box<dyn FnOnce() -> AnyView>`) slot — do NOT get their event handlers
+/// attached, so the create-bucket / delete confirmation modals never open. Each
+/// page is therefore a direct child element of its route's layout component.
 ///
-/// Pitfall 1 (RESEARCH.md): do NOT use `axum::Router::nest("/ui", …)` to wrap
-/// Leptos routes — that creates a double `/ui/ui/` prefix. The `/ui` prefix lives
-/// here, inside the Leptos Router tree.
+/// All paths start with `/ui` so `generate_route_list(App)` emits `/ui/…` and the
+/// S3 fallback never sees UI requests. Do NOT use `axum::Router::nest("/ui", …)`.
 #[component]
 pub fn App() -> impl IntoView {
     view! {
         <Router>
             <Routes fallback=|| view! { <p>"Not found"</p> }>
-                <ParentRoute path=path!("/ui") view=Shell>
-                    <Route path=path!("") view=BucketListPage />
-                    <Route path=path!("buckets/:bucket") view=ObjectBrowserPage />
-                    <Route path=path!("settings") view=SettingsPage />
-                </ParentRoute>
+                <Route path=path!("/ui") view=BucketsRoute />
+                <Route path=path!("/ui/buckets/:bucket") view=ObjectsRoute />
+                <Route path=path!("/ui/settings") view=SettingsRoute />
             </Routes>
         </Router>
     }
 }
 
-/// Layout shell wrapping sidebar + main content area + toast stack.
-///
-/// The Shell renders the 220px Sidebar (SSR-only), the main content area
-/// (`<Outlet />` — child routes), and the Toast island (hydrated).
-///
-/// Sidebar receives no bucket list here (no server fn call from shell — pages
-/// handle their own data). Sidebar shows only the settings link + theme toggle
-/// + status at the shell level. The bucket nav list is populated on each page.
+/// Shared chrome styles (kept as constants so each route component stays small).
+const SHELL: &str = "display:flex;height:100%;width:100%;overflow:hidden;\
+    background:var(--bg);color:var(--text);font-size:13px;line-height:1.45;\
+    transform:translateZ(0)";
+const MAIN: &str = "flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden";
+
 #[component]
-fn Shell() -> impl IntoView {
+fn BucketsRoute() -> impl IntoView {
     view! {
-        <div class="app-shell">
-            // 220px fixed sidebar (SSR)
+        <div style=SHELL>
             <Sidebar />
-            // Main content area — child route renders here
-            <main class="main-content" style="overflow-y:auto;">
-                <Outlet />
+            <main style=MAIN>
+                <BucketListPage />
             </main>
-            // Toast island (top-right stack, hydrated)
+            <Toast />
+        </div>
+    }
+}
+
+#[component]
+fn ObjectsRoute() -> impl IntoView {
+    view! {
+        <div style=SHELL>
+            <Sidebar />
+            <main style=MAIN>
+                <ObjectBrowserPage />
+            </main>
+            <Toast />
+        </div>
+    }
+}
+
+#[component]
+fn SettingsRoute() -> impl IntoView {
+    view! {
+        <div style=SHELL>
+            <Sidebar />
+            <main style=MAIN>
+                <SettingsPage />
+            </main>
             <Toast />
         </div>
     }

@@ -49,28 +49,22 @@ pub fn CopyButton(
     };
 
     view! {
+        // Scoped hover (template Copy buttons darken on hover via accent-2).
+        <style>".copy-btn:hover{background:var(--accent-2)}"</style>
         <button
             aria-label=move || copy_label.get_value()
             on:click=handle_copy
-            style="background:none;border:1px solid var(--border);\
-                color:var(--text);border-radius:4px;padding:6px 12px;\
-                font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;\
-                transition:background-color 150ms ease,border-color 150ms ease;"
+            class="copy-btn"
+            style="flex:none;display:flex;align-items:center;gap:6px;\
+                padding:6px 10px;border:none;border-radius:5px;\
+                background:var(--accent);color:#fff;font-family:inherit;\
+                font-size:12px;font-weight:600;cursor:pointer;\
+                transition:background-color 150ms ease;"
         >
-            // Clipboard SVG icon (Lucide)
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            >
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            // Clipboard SVG icon (template style — white stroke on accent)
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <rect x="5" y="5" width="8" height="8" rx="1.4" stroke="#fff" stroke-width="1.3" />
+                <path d="M3 11V4.4C3 3.6 3.6 3 4.4 3H11" stroke="#fff" stroke-width="1.3" />
             </svg>
             {move || {
                 if copied.get() {

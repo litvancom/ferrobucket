@@ -48,105 +48,63 @@ pub fn PaginationBar(
 
     view! {
         <div style="display:flex;align-items:center;justify-content:space-between;\
-            padding:12px 16px;border-top:1px solid var(--border);">
-            // Previous button
-            {if has_prev {
-                view! {
-                    <a
-                        href=prev_href
-                        style="display:inline-flex;align-items:center;gap:6px;\
-                            padding:6px 12px;font-size:14px;color:var(--text);\
-                            text-decoration:none;border:1px solid var(--border);\
-                            border-radius:4px;transition:background-color 150ms ease,\
-                            border-color 150ms ease;"
-                    >
-                        // Left arrow icon (Lucide)
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="14" height="14" viewBox="0 0 24 24"
-                            fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            aria-hidden="true"
-                        >
-                            <polyline points="15 18 9 12 15 6"/>
-                        </svg>
-                        "Previous"
-                    </a>
-                }.into_any()
-            } else {
-                view! {
-                    <span
-                        aria-disabled="true"
-                        style="display:inline-flex;align-items:center;gap:6px;\
-                            padding:6px 12px;font-size:14px;color:var(--text-muted);\
-                            border:1px solid var(--border);border-radius:4px;\
-                            opacity:0.4;cursor:not-allowed;"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="14" height="14" viewBox="0 0 24 24"
-                            fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            aria-hidden="true"
-                        >
-                            <polyline points="15 18 9 12 15 6"/>
-                        </svg>
-                        "Previous"
-                    </span>
-                }.into_any()
-            }}
-
-            // Page indicator
-            <span style="font-size:12px;color:var(--text-muted);">
+            padding:10px 16px;font-size:12px;color:var(--faint);\
+            border-top:1px solid var(--border);">
+            // Page indicator (mono) — left
+            <span style="font-family:'IBM Plex Mono',monospace;">
                 {format!("Page {}", page_num)}
             </span>
 
-            // Next button
-            {if has_next {
-                view! {
-                    <a
-                        href=next_href
-                        style="display:inline-flex;align-items:center;gap:6px;\
-                            padding:6px 12px;font-size:14px;color:var(--text);\
-                            text-decoration:none;border:1px solid var(--border);\
-                            border-radius:4px;transition:background-color 150ms ease,\
-                            border-color 150ms ease;"
-                    >
-                        "Next"
-                        // Right arrow icon (Lucide)
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="14" height="14" viewBox="0 0 24 24"
-                            fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            aria-hidden="true"
+            // Prev / Next controls — right
+            <div style="display:flex;align-items:center;gap:6px;">
+                {if has_prev {
+                    view! {
+                        <a
+                            href=prev_href
+                            style="padding:4px 9px;border:1px solid var(--border);\
+                                border-radius:6px;background:var(--surface);color:var(--text);\
+                                font-family:inherit;font-size:12px;text-decoration:none;cursor:pointer;"
                         >
-                            <polyline points="9 18 15 12 9 6"/>
-                        </svg>
-                    </a>
-                }.into_any()
-            } else {
-                view! {
-                    <span
-                        aria-disabled="true"
-                        style="display:inline-flex;align-items:center;gap:6px;\
-                            padding:6px 12px;font-size:14px;color:var(--text-muted);\
-                            border:1px solid var(--border);border-radius:4px;\
-                            opacity:0.4;cursor:not-allowed;"
-                    >
-                        "Next"
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="14" height="14" viewBox="0 0 24 24"
-                            fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            aria-hidden="true"
+                            "Prev"
+                        </a>
+                    }.into_any()
+                } else {
+                    view! {
+                        <span
+                            aria-disabled="true"
+                            style="padding:4px 9px;border:1px solid var(--border);\
+                                border-radius:6px;background:var(--surface);color:var(--faint);\
+                                font-family:inherit;font-size:12px;cursor:not-allowed;"
                         >
-                            <polyline points="9 18 15 12 9 6"/>
-                        </svg>
-                    </span>
-                }.into_any()
-            }}
+                            "Prev"
+                        </span>
+                    }.into_any()
+                }}
+
+                {if has_next {
+                    view! {
+                        <a
+                            href=next_href
+                            style="padding:4px 9px;border:1px solid var(--border);\
+                                border-radius:6px;background:var(--surface);color:var(--text);\
+                                font-family:inherit;font-size:12px;text-decoration:none;cursor:pointer;"
+                        >
+                            "Next"
+                        </a>
+                    }.into_any()
+                } else {
+                    view! {
+                        <span
+                            aria-disabled="true"
+                            style="padding:4px 9px;border:1px solid var(--border);\
+                                border-radius:6px;background:var(--surface);color:var(--faint);\
+                                font-family:inherit;font-size:12px;cursor:not-allowed;"
+                        >
+                            "Next"
+                        </span>
+                    }.into_any()
+                }}
+            </div>
         </div>
     }
 }

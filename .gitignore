@@ -1,3 +1,26 @@
+# Build artifacts
 /target
-scratch/
+
+# Runtime data directory
 /data
+
+# Scratch / temporary working files
+scratch/
+
+# Local tooling & agent state (not part of the project)
+/.ai/
+/.planning/
+/.codegraph/
+/.claude/
+/.playwright/
+/.playwright-cli/
+/.idea/
+cargo-leptos-*/
+
+# Environment files — never commit secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor junk
+.DS_Store

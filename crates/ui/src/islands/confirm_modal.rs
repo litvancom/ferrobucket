@@ -94,76 +94,84 @@ pub fn ConfirmModal(
     };
 
     view! {
-        // Delete trigger button (destructive color, icon-only — aria-label required for accessibility)
+        // Scoped hover states for the row trash trigger + modal footer buttons (template style-hover)
+        <style>
+            ".fb-confirm-trigger:hover{background:var(--danger-dim);color:var(--danger)}\
+             .fb-confirm-cancel:hover{background:var(--hover)}\
+             .fb-confirm-yes:hover{filter:brightness(1.1)}"
+        </style>
+
+        // Delete trigger button (row action — borderless ghost; aria-label required for accessibility)
         <button
+            class="fb-confirm-trigger"
             on:click=handle_open
             aria-label=move || {
                 let lbl = aria_label.get_value();
                 if lbl.is_empty() { None } else { Some(lbl) }
             }
-            style="background:none;border:none;cursor:pointer;\
-                color:var(--destructive);font-size:14px;padding:4px 8px;\
-                border-radius:4px;transition:background-color 150ms ease;"
+            style="width:28px;height:28px;flex:none;display:flex;align-items:center;justify-content:center;\
+                border:none;border-radius:6px;background:transparent;color:var(--faint);cursor:pointer"
         >
-            // Trash icon (Lucide)
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-            >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                <path d="M10 11v6" />
-                <path d="M14 11v6" />
-                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            // Trash icon (template inline svg)
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                    d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                />
             </svg>
         </button>
 
         <Show when=move || open.get()>
-            // Backdrop
+            // Overlay
             <div
-                style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:500;\
-                    display:flex;align-items:center;justify-content:center;"
+                style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;\
+                    justify-content:center;animation:overlayIn .15s ease;z-index:50"
                 on:click=handle_backdrop
             >
-                // Modal panel
+                // Dialog
                 <div
-                    style="background:var(--surface);border:1px solid var(--border);\
-                        border-radius:8px;padding:32px;max-width:440px;width:100%;\
-                        margin:0 16px;z-index:501;box-shadow:0 8px 32px rgba(0,0,0,0.5);"
+                    style="width:420px;max-width:92vw;background:var(--panel);border:1px solid var(--border-2);\
+                        border-radius:12px;box-shadow:var(--shadow);animation:modalIn .18s cubic-bezier(.2,.7,.3,1)"
                     on:click=|e| e.stop_propagation()
                 >
-                    <h2 style="font-size:16px;font-weight:600;color:var(--text);margin:0 0 12px 0;line-height:1.3;">
-                        {title}
-                    </h2>
-                    <p style="font-size:14px;color:var(--text-muted);margin:0 0 24px 0;line-height:1.5;">
-                        {message}
-                    </p>
-                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <div style="display:flex;gap:13px;padding:20px 20px 16px">
+                        // Danger icon tile
+                        <div style="width:34px;height:34px;flex:none;border-radius:9px;background:var(--danger-dim);\
+                            display:flex;align-items:center;justify-content:center;color:var(--danger)">
+                            <svg width="17" height="17" viewBox="0 0 16 16" fill="none">
+                                <path d="M8 1.5 15 14H1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                                <path d="M8 6v3.4M8 11.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <div style="font-size:16px;font-weight:600;letter-spacing:-.2px">
+                                {title}
+                            </div>
+                            <div style="font-size:13px;color:var(--dim);margin-top:4px;line-height:1.5">
+                                {message}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;gap:9px;padding:14px 20px;border-top:1px solid var(--border)">
                         <button
+                            class="fb-confirm-cancel"
                             on:click=handle_dismiss
                             disabled=move || loading.get()
-                            style="background:none;border:1px solid var(--border);\
-                                color:var(--text);border-radius:4px;padding:8px 16px;\
-                                font-size:14px;cursor:pointer;\
-                                transition:background-color 150ms ease,border-color 150ms ease;"
+                            style="padding:8px 15px;border:1px solid var(--border-2);border-radius:7px;\
+                                background:transparent;color:var(--text);font-family:inherit;\
+                                font-size:13px;font-weight:500;cursor:pointer"
                         >
                             {dismiss_label}
                         </button>
                         <button
+                            class="fb-confirm-yes"
                             on:click=handle_confirm
                             disabled=move || loading.get()
-                            style="background:var(--destructive);border:1px solid var(--destructive);\
-                                color:#fff;border-radius:4px;padding:8px 16px;\
-                                font-size:14px;cursor:pointer;font-weight:600;\
-                                transition:background-color 150ms ease,border-color 150ms ease;"
+                            style="padding:8px 15px;border:none;border-radius:7px;background:var(--danger);\
+                                color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer"
                         >
                             {confirm_label}
                         </button>

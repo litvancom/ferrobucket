@@ -1,4 +1,4 @@
-//! Sidebar SSR component — 220px fixed navigation panel.
+//! Sidebar SSR component — 252px fixed navigation panel.
 //!
 //! Renders: app name, bucket nav list (active bucket = accent left border),
 //! settings link, ThemeToggle island, and SidebarStatus island.
@@ -6,8 +6,10 @@
 //! Security invariant: no presign/hmac/secret/sigv4 code. SSR-only.
 
 use leptos::prelude::*;
+use leptos_router::hooks::use_location;
 
 use crate::islands::{SidebarStatus, ThemeToggle};
+use crate::server_fns::buckets::list_buckets_fn;
 
 /// Sidebar component (SSR only).
 ///
@@ -19,116 +21,141 @@ use crate::islands::{SidebarStatus, ThemeToggle};
 /// which calls `check_status_fn` client-side. This fixes GAP-04-05 where the
 /// previous static `StatusIndicator` prop never called the server fn.
 #[component]
-pub fn Sidebar(
-    #[prop(default = Vec::new())] buckets: Vec<String>,
-    #[prop(default = String::new())] active_bucket: String,
-) -> impl IntoView {
-    let active = StoredValue::new(active_bucket);
+pub fn Sidebar() -> impl IntoView {
+    // Load the bucket list here (SSR-resolved) so the nav list + count populate on
+    // every screen. Rendered once — its islands are NOT duplicated by a Suspense fallback.
+    let buckets_res = Resource::new_blocking(|| (), |_| async move { list_buckets_fn().await });
+    let names = move || {
+        buckets_res
+            .get()
+            .and_then(|r| r.ok())
+            .map(|rows| rows.into_iter().map(|b| b.name).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    // Active bucket derived reactively from the URL (`/ui/buckets/{name}`), so the
+    // highlight stays correct across both SSR and client-side navigation.
+    let location = use_location();
+    let active = Memo::new(move |_| {
+        location
+            .pathname
+            .get()
+            .strip_prefix("/ui/buckets/")
+            .map(|rest| rest.split('/').next().unwrap_or("").to_string())
+            .unwrap_or_default()
+    });
 
     view! {
-        <nav
+        // Scoped hover styles (template uses style-hover="…"; reproduced as :hover here)
+        <style>
+            ".fb-bucket-row:hover{background:var(--hover) !important;color:var(--text) !important}\
+             .fb-settings-btn:hover{background:var(--hover) !important;color:var(--text) !important}\
+             .fb-nav-btn:hover{background:var(--hover) !important;color:var(--text) !important}"
+        </style>
+        <aside
             aria-label="Main navigation"
-            style="width:220px;flex-shrink:0;background:var(--surface);\
-                border-right:1px solid var(--border);display:flex;\
-                flex-direction:column;height:100vh;position:sticky;\
-                top:0;overflow-y:auto;"
+            style="width:252px;flex:none;display:flex;flex-direction:column;\
+                background:var(--panel);border-right:1px solid var(--border)"
         >
-            // App name / logo
-            <div style="padding:24px 16px 16px;border-bottom:1px solid var(--border);">
-                <span style="font-size:16px;font-weight:600;color:var(--text);\
-                    letter-spacing:-0.01em;">
-                    "ferrobucket"
-                </span>
+            // Logo box + name + version badge
+            <div style="display:flex;align-items:center;gap:9px;padding:15px 16px 14px">
+                <div style="width:24px;height:24px;border-radius:6px;background:var(--accent);\
+                    display:flex;align-items:center;justify-content:center;flex:none">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round"><path d="M4.3 4Q8 1.3 11.7 4"/><ellipse cx="8" cy="4.5" rx="4.9" ry="1.5"/><path d="M3.3 4.7 4.7 12.3Q8 13.7 11.3 12.3L12.7 4.7"/></svg>
+                </div>
+                <div style="font-weight:700;font-size:14px;letter-spacing:-.2px">"ferrobucket"</div>
+                <div style="margin-left:auto;font-family:'IBM Plex Mono',monospace;\
+                    font-size:10px;color:var(--faint);border:1px solid var(--border);\
+                    border-radius:4px;padding:1px 5px">"v0.4"</div>
             </div>
 
-            // Buckets section
-            <div style="flex:1;padding:8px 0;overflow-y:auto;">
-                <div style="padding:8px 16px 4px;">
-                    <span style="font-size:12px;font-weight:400;color:var(--text-muted);\
-                        text-transform:uppercase;letter-spacing:0.05em;">
-                        "Buckets"
-                    </span>
-                </div>
-                <ul style="list-style:none;margin:0;padding:0;">
-                    {buckets.into_iter().map(|name| {
-                        let is_active = name == active.get_value();
-                        let href = format!("/ui/buckets/{}", name);
-                        let name_display = name.clone();
-                        view! {
-                            <li>
-                                <a
-                                    href=href
-                                    style=move || {
-                                        let base = "display:block;padding:6px 16px;\
-                                            font-size:14px;text-decoration:none;\
-                                            white-space:nowrap;overflow:hidden;\
-                                            text-overflow:ellipsis;\
-                                            transition:background-color 150ms ease,\
-                                            color 150ms ease;".to_string();
-                                        if is_active {
-                                            format!("{base}color:var(--accent);\
-                                                border-left:2px solid var(--accent);\
-                                                padding-left:14px;background:var(--surface-raised);")
-                                        } else {
-                                            format!("{base}color:var(--text);\
-                                                border-left:2px solid transparent;\
-                                                padding-left:14px;")
-                                        }
-                                    }
-                                >
-                                    {name_display}
-                                </a>
-                            </li>
+            // Connection status card island (hydrated, calls check_status_fn — fixes GAP-04-05)
+            <SidebarStatus />
+
+            // Buckets nav button with count
+            <div style="padding:0 8px">
+                <a
+                    href="/ui"
+                    class="fb-nav-btn"
+                    style=move || {
+                        let base = "width:100%;display:flex;align-items:center;gap:9px;\
+                            padding:7px 10px;border:none;border-radius:6px;color:var(--text);\
+                            font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;\
+                            text-align:left;text-decoration:none;box-sizing:border-box;".to_string();
+                        if active.get().is_empty() {
+                            format!("{base}background:var(--surface);")
+                        } else {
+                            format!("{base}background:transparent;")
                         }
-                    }).collect_view()}
-                </ul>
-                // Link to bucket list (home)
-                <div style="padding:4px 16px 8px;">
-                    <a
-                        href="/ui"
-                        style="font-size:12px;color:var(--text-muted);\
-                            text-decoration:none;display:block;padding:4px 0;\
-                            transition:color 150ms ease;"
-                    >
-                        "+ All buckets"
-                    </a>
-                </div>
+                    }
+                >
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="4" rx="5.5" ry="2.2" stroke="currentColor" stroke-width="1.2"/><path d="M2.5 4v8c0 1.2 2.46 2.2 5.5 2.2s5.5-1 5.5-2.2V4M2.5 8c0 1.2 2.46 2.2 5.5 2.2s5.5-1 5.5-2.2" stroke="currentColor" stroke-width="1.2"/></svg>
+                    "Buckets"
+                    <span style="margin-left:auto;font-family:'IBM Plex Mono',monospace;\
+                        font-size:11px;color:var(--faint)">
+                        <Suspense>{move || Some(names().len())}</Suspense>
+                    </span>
+                </a>
             </div>
 
-            // Bottom section: settings + theme toggle + status
-            <div style="border-top:1px solid var(--border);padding:12px 0;">
-                // Settings link
+            // ALL BUCKETS section label
+            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;color:var(--faint);\
+                text-transform:uppercase;padding:14px 18px 6px">"All buckets"</div>
+
+            // Scrollable per-bucket mono list (Suspense wraps only <a> links — no islands here)
+            <div style="flex:1;overflow-y:auto;padding:0 8px 8px">
+                <Suspense>
+                {move || names().into_iter().map(|name| {
+                    let href = format!("/ui/buckets/{}", name);
+                    let name_display = name.clone();
+                    let name_row = name.clone();
+                    let name_dot = name.clone();
+                    view! {
+                        <a
+                            href=href
+                            class="fb-bucket-row"
+                            style=move || {
+                                let is_active = active.get() == name_row;
+                                let row_bg = if is_active { "var(--hover)" } else { "transparent" };
+                                let row_color = if is_active { "var(--text)" } else { "var(--dim)" };
+                                format!(
+                                    "width:100%;display:flex;align-items:center;gap:8px;\
+                                    padding:6px 10px;margin-bottom:1px;border:none;border-radius:6px;\
+                                    background:{row_bg};color:{row_color};\
+                                    font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer;\
+                                    text-align:left;text-decoration:none;box-sizing:border-box;"
+                                )
+                            }
+                        >
+                            <span style=move || {
+                                let dot_bg = if active.get() == name_dot { "var(--accent)" } else { "var(--border-2)" };
+                                format!("width:5px;height:5px;border-radius:1px;background:{dot_bg};flex:none")
+                            }></span>
+                            <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;\
+                                white-space:nowrap;flex:1">{name_display}</span>
+                        </a>
+                    }
+                }).collect_view()}
+                </Suspense>
+            </div>
+
+            // Footer: Settings ghost button + boxed theme toggle
+            <div style="border-top:1px solid var(--border);padding:8px;display:flex;\
+                align-items:center;gap:6px">
                 <a
                     href="/ui/settings"
-                    style="display:flex;align-items:center;gap:8px;\
-                        padding:8px 16px;font-size:14px;color:var(--text-muted);\
-                        text-decoration:none;transition:color 150ms ease,\
-                        background-color 150ms ease;"
+                    class="fb-settings-btn"
+                    style="flex:1;display:flex;align-items:center;gap:9px;padding:7px 10px;\
+                        border:none;border-radius:6px;background:transparent;color:var(--dim);\
+                        font-family:inherit;font-size:13px;cursor:pointer;text-align:left;\
+                        text-decoration:none;box-sizing:border-box;"
                 >
-                    // Settings gear icon (Lucide)
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16" height="16" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor"
-                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                        aria-hidden="true"
-                    >
-                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                    </svg>
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.2"/><path d="M8 1.4v2M8 12.6v2M14.6 8h-2M3.4 8h-2M12.7 3.3l-1.4 1.4M4.7 11.3l-1.4 1.4M12.7 12.7l-1.4-1.4M4.7 4.7 3.3 3.3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
                     "Settings"
                 </a>
 
                 // Theme toggle island (hydrated, persists via localStorage)
-                <div style="padding:4px 16px;">
-                    <ThemeToggle />
-                </div>
-
-                // Status indicator island (hydrated, calls check_status_fn — fixes GAP-04-05)
-                <div style="padding:8px 16px 4px;">
-                    <SidebarStatus />
-                </div>
+                <ThemeToggle />
             </div>
-        </nav>
+        </aside>
     }
 }

@@ -5,6 +5,8 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/litvancom/ferrobucket"
+homepage = "https://github.com/litvancom/ferrobucket"
 
 # cargo-leptos workspace metadata (Phase 0 compile-verified key set, DECISIONS.md §3.7).
 # Assumption A1: workspace form [[workspace.metadata.leptos]] with bin-package/lib-package

@@ -12,6 +12,12 @@ use leptos::prelude::*;
 use crate::islands::confirm_modal::{ConfirmAction, ConfirmModal};
 use crate::types::BucketRow;
 
+/// Format an RFC 3339 timestamp ("2026-06-20T18:09:40Z") as a calendar date
+/// ("2026-06-20") to match the design template's clean date column.
+fn fmt_date(ts: &str) -> String {
+    ts.get(..10).unwrap_or(ts).to_string()
+}
+
 /// Format bytes as human-readable string (B, KB, MB, GB, TB).
 fn fmt_size(bytes: u64) -> String {
     const KB: u64 = 1024;
@@ -38,89 +44,84 @@ fn fmt_size(bytes: u64) -> String {
 #[component]
 pub fn BucketTable(rows: Vec<BucketRow>) -> impl IntoView {
     view! {
-        <table
-            style="width:100%;border-collapse:collapse;"
+        // Bordered rounded card containing a grid table (template: buckets view)
+        <div
+            style="border:1px solid var(--border);border-radius:9px;overflow:hidden;\
+                background:var(--surface);"
             aria-label="Bucket list"
         >
-            <thead>
-                <tr style="border-bottom:1px solid var(--border);">
-                    <th style="text-align:left;padding:8px 16px;font-size:12px;\
-                        font-weight:400;color:var(--text-muted);white-space:nowrap;">
-                        "Name"
-                    </th>
-                    <th style="text-align:left;padding:8px 16px;font-size:12px;\
-                        font-weight:400;color:var(--text-muted);white-space:nowrap;">
-                        "Created"
-                    </th>
-                    <th style="text-align:right;padding:8px 16px;font-size:12px;\
-                        font-weight:400;color:var(--text-muted);white-space:nowrap;">
-                        "Objects"
-                    </th>
-                    <th style="text-align:right;padding:8px 16px;font-size:12px;\
-                        font-weight:400;color:var(--text-muted);white-space:nowrap;">
-                        "Total Size"
-                    </th>
-                    <th style="text-align:right;padding:8px 16px;font-size:12px;\
-                        font-weight:400;color:var(--text-muted);white-space:nowrap;">
-                        "Actions"
-                    </th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows.into_iter().map(|row| {
-                    let href = format!("/ui/buckets/{}", row.name);
-                    let name_display = row.name.clone();
-                    // aria-label for accessibility (icon-only delete button — UI-SPEC)
-                    let delete_label = format!("Delete bucket {}", row.name);
-                    let count_str = row.object_count.to_string();
-                    let size_str = fmt_size(row.total_size);
+            // Header row — uppercase faint, grid columns: 1fr 150px 110px 130px 44px
+            <div style="display:grid;grid-template-columns:1fr 150px 110px 130px 44px;\
+                gap:0;padding:9px 16px;border-bottom:1px solid var(--border);\
+                font-size:11px;font-weight:600;letter-spacing:.4px;color:var(--faint);\
+                text-transform:uppercase;">
+                <div>"Name"</div>
+                <div>"Created"</div>
+                <div style="text-align:right;">"Objects"</div>
+                <div style="text-align:right;">"Size"</div>
+                <div></div>
+            </div>
+            {rows.into_iter().map(|row| {
+                let href = format!("/ui/buckets/{}", row.name);
+                let name_display = row.name.clone();
+                // aria-label for accessibility (icon-only delete button — UI-SPEC)
+                let delete_label = format!("Delete bucket {}", row.name);
+                let count_str = row.object_count.to_string();
+                let size_str = fmt_size(row.total_size);
 
-                    view! {
-                        <tr
-                            style="border-bottom:1px solid var(--border);\
-                                transition:background-color 150ms ease;"
-                            onmouseover="this.style.backgroundColor='var(--surface-raised)'"
-                            onmouseout="this.style.backgroundColor=''"
-                        >
-                            // Name column — clickable, IBM Plex Sans 14px
-                            <td style="padding:8px 16px;">
-                                <a
-                                    href=href
-                                    style="color:var(--accent);text-decoration:none;\
-                                        font-size:14px;font-weight:400;"
-                                >
-                                    {name_display}
-                                </a>
-                            </td>
-                            // Created — IBM Plex Mono 13px, --text-muted
-                            <td style="padding:8px 16px;font-family:'IBM Plex Mono',monospace;\
-                                font-size:13px;color:var(--text-muted);">
-                                {row.created}
-                            </td>
-                            // Object count — IBM Plex Mono 13px, --text-muted, right-aligned
-                            <td style="padding:8px 16px;font-family:'IBM Plex Mono',monospace;\
-                                font-size:13px;color:var(--text-muted);text-align:right;">
-                                {count_str}
-                            </td>
-                            // Total size — IBM Plex Mono 13px, --text-muted, right-aligned
-                            <td style="padding:8px 16px;font-family:'IBM Plex Mono',monospace;\
-                                font-size:13px;color:var(--text-muted);text-align:right;">
-                                {size_str}
-                            </td>
-                            // Actions column: delete via ConfirmModal island
-                            <td style="padding:8px 16px;text-align:right;">
-                                <ConfirmModal
-                                    action=ConfirmAction::DeleteBucket
-                                    name=row.name.clone()
-                                    bucket=row.name.clone()
-                                    object_key=String::new()
-                                    aria_label=delete_label
-                                />
-                            </td>
-                        </tr>
-                    }
-                }).collect_view()}
-            </tbody>
-        </table>
+                view! {
+                    // Data row — grid, hover surface-2
+                    <div
+                        style="display:grid;grid-template-columns:1fr 150px 110px 130px 44px;\
+                            gap:0;align-items:center;padding:11px 16px;\
+                            border-bottom:1px solid var(--border);\
+                            transition:background-color 150ms ease;"
+                        onmouseover="this.style.backgroundColor='var(--surface-2)'"
+                        onmouseout="this.style.backgroundColor=''"
+                    >
+                        // Name column — bucket icon (accent) + clickable mono name
+                        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex:none;color:var(--accent);">
+                                <ellipse cx="8" cy="4" rx="5.3" ry="2" stroke="currentColor" stroke-width="1.2"/>
+                                <path d="M2.7 4v8c0 1.1 2.37 2 5.3 2s5.3-.9 5.3-2V4M2.7 8c0 1.1 2.37 2 5.3 2s5.3-.9 5.3-2" stroke="currentColor" stroke-width="1.2"/>
+                            </svg>
+                            <a
+                                href=href
+                                style="font-family:'IBM Plex Mono',monospace;font-size:13px;\
+                                    font-weight:500;color:var(--text);text-decoration:none;\
+                                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                            >
+                                {name_display}
+                            </a>
+                        </div>
+                        // Created — mono, dim
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;\
+                            color:var(--dim);">
+                            {fmt_date(&row.created)}
+                        </div>
+                        // Object count — mono, dim, right-aligned
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;\
+                            color:var(--dim);text-align:right;">
+                            {count_str}
+                        </div>
+                        // Total size — mono, text, right-aligned
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;\
+                            color:var(--text);text-align:right;">
+                            {size_str}
+                        </div>
+                        // Actions column: delete via ConfirmModal island
+                        <div style="display:flex;justify-content:flex-end;">
+                            <ConfirmModal
+                                action=ConfirmAction::DeleteBucket
+                                name=row.name.clone()
+                                bucket=row.name.clone()
+                                object_key=String::new()
+                                aria_label=delete_label
+                            />
+                        </div>
+                    </div>
+                }
+            }).collect_view()}
+        </div>
     }
 }

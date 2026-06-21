@@ -1,7 +1,11 @@
 [package]
 name = "ferrobucket-storage"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Filesystem object-storage backend for ferrobucket — S3-compatible, decoupled pure logic."
+publish = false
 
 [dependencies]
 thiserror = "2"

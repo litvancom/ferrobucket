@@ -47,7 +47,8 @@ pub fn ObjectBrowserPage() -> impl IntoView {
     let continuation = move || query.read().get("continuation").unwrap_or_default();
 
     // Listing Resource — reacts to bucket/prefix/continuation changes
-    let listing = Resource::new(
+    // Blocking: in-order SSR so the row islands (SlideOver, delete ConfirmModal) hydrate.
+    let listing = Resource::new_blocking(
         move || (bucket(), prefix(), continuation()),
         |(b, p, c)| async move {
             list_objects_fn(
@@ -64,86 +65,94 @@ pub fn ObjectBrowserPage() -> impl IntoView {
 
     view! {
         <div style="display:flex;flex-direction:column;height:100%;">
-            // Page header
-            <div style="padding:24px 32px 0;flex-shrink:0;">
-                <div style="display:flex;align-items:center;\
-                    justify-content:space-between;margin-bottom:16px;">
-                    <h1 style="font-size:16px;font-weight:600;color:var(--text);\
-                        margin:0;line-height:1.3;overflow:hidden;\
-                        text-overflow:ellipsis;white-space:nowrap;">
-                        {move || bucket()}
-                    </h1>
-                    // "Upload Files" accent hint (drag-drop zone below does the work)
-                    <span style="font-size:12px;color:var(--text-muted);">
-                        "Drag files below to upload"
-                    </span>
-                </div>
+            // Page header — back icon-button + breadcrumb (mono) + prefix filter
+            <header style="display:flex;align-items:center;gap:14px;\
+                padding:14px 28px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                // Back-to-buckets icon button
+                <a
+                    href="/ui"
+                    title="Back to buckets"
+                    aria-label="Back to buckets"
+                    style="width:30px;height:30px;flex:none;display:flex;align-items:center;\
+                        justify-content:center;border:1px solid var(--border);border-radius:7px;\
+                        background:var(--surface);color:var(--dim);cursor:pointer;\
+                        text-decoration:none;transition:color 150ms ease,border-color 150ms ease;"
+                    onmouseover="this.style.color='var(--text)';this.style.borderColor='var(--border-2)'"
+                    onmouseout="this.style.color='var(--dim)';this.style.borderColor='var(--border)'"
+                >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M9.5 3.5 5 8l4.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </a>
 
-                // Breadcrumb (prefix nav — clickable segments, --accent text)
+                // Breadcrumb (prefix nav — clickable mono segments)
                 <Breadcrumb
                     bucket=bucket()
                     prefix=prefix()
                 />
-            </div>
 
-            // Prefix filter input (server-side GET form redirect)
-            <div style="padding:16px 32px 8px;flex-shrink:0;">
-                <form
-                    method="get"
-                    action=move || base_href()
-                    style="display:flex;gap:8px;"
-                >
-                    <input
-                        type="text"
-                        name="prefix"
-                        value=move || prefix()
-                        placeholder="Filter by prefix\u{2026}"
-                        style="flex:1;background:var(--surface);color:var(--text);\
-                            border:1px solid var(--border);border-radius:4px;\
-                            padding:6px 12px;font-family:'IBM Plex Mono',monospace;\
-                            font-size:13px;outline:none;max-width:400px;\
-                            transition:border-color 150ms ease;"
-                    />
-                    <button
-                        type="submit"
-                        style="background:var(--surface);color:var(--text);\
-                            border:1px solid var(--border);border-radius:4px;\
-                            padding:6px 12px;font-size:13px;cursor:pointer;\
-                            transition:background-color 150ms ease,border-color 150ms ease;"
+                // Prefix filter (search box) — server-side GET form redirect
+                <div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex:none;">
+                    <form
+                        method="get"
+                        action=move || base_href()
+                        class="fb-search"
+                        style="display:flex;align-items:center;gap:7px;padding:7px 11px;\
+                            border:1px solid var(--border-2);border-radius:7px;\
+                            background:var(--surface);width:220px;\
+                            transition:border-color 150ms ease,box-shadow 150ms ease;"
                     >
-                        "Filter"
-                    </button>
-                    // Clear filter link
-                    {move || {
-                        let p = prefix();
-                        if !p.is_empty() {
-                            Either::Left(view! {
-                                <a
-                                    href=base_href()
-                                    style="display:inline-flex;align-items:center;\
-                                        padding:6px 12px;font-size:13px;color:var(--text-muted);\
-                                        text-decoration:none;border:1px solid var(--border);\
-                                        border-radius:4px;transition:color 150ms ease;"
-                                >
-                                    "Clear"
-                                </a>
-                            })
-                        } else {
-                            Either::Right(())
-                        }
-                    }}
-                </form>
-            </div>
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="flex:none;color:var(--faint);" aria-hidden="true">
+                            <circle cx="7" cy="7" r="4.3" stroke="currentColor" stroke-width="1.2"/>
+                            <path d="M10.3 10.3 14 14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        </svg>
+                        <input
+                            type="text"
+                            name="prefix"
+                            value=move || prefix()
+                            placeholder="Filter by prefix\u{2026}"
+                            spellcheck="false"
+                            style="flex:1;min-width:0;border:none;background:transparent;\
+                                color:var(--text);font-family:'IBM Plex Mono',monospace;\
+                                font-size:12.5px;outline:none;"
+                        />
+                        // Clear filter link (only when a prefix is active)
+                        {move || {
+                            let p = prefix();
+                            if !p.is_empty() {
+                                Either::Left(view! {
+                                    <a
+                                        href=base_href()
+                                        title="Clear filter"
+                                        aria-label="Clear filter"
+                                        style="flex:none;display:flex;align-items:center;\
+                                            justify-content:center;color:var(--faint);\
+                                            text-decoration:none;cursor:pointer;"
+                                        onmouseover="this.style.color='var(--text)'"
+                                        onmouseout="this.style.color='var(--faint)'"
+                                    >
+                                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                                        </svg>
+                                    </a>
+                                })
+                            } else {
+                                Either::Right(())
+                            }
+                        }}
+                    </form>
+                </div>
+            </header>
 
             // Upload island (drag-and-drop zone + fixed-bottom progress panel in
             // ONE hydrated island — D-06, D-07, D-08; GAP-04-01 fix: zone + panel
             // share one locally-owned entries signal, no cross-island use_context).
-            <div style="padding:0 32px 16px;flex-shrink:0;">
+            <div style="padding:18px 28px 0;flex-shrink:0;">
                 <UploadIsland bucket=bucket() prefix=prefix() />
             </div>
 
             // Object table with Suspense for SSR loading state
-            <div style="flex:1;overflow-y:auto;min-height:0;">
+            <div style="flex:1;overflow-y:auto;min-height:0;padding:18px 28px 40px;">
                 <Suspense fallback=|| view! { <LoadingState /> }>
                     {move || {
                         listing.get().map(|result| {
@@ -182,7 +191,9 @@ pub fn ObjectBrowserPage() -> impl IntoView {
                                         }
                                     } else {
                                         view! {
-                                            <div>
+                                            // Bordered card wrapping table + footer (template radius:9px)
+                                            <div style="border:1px solid var(--border);\
+                                                border-radius:9px;overflow:hidden;background:var(--surface);">
                                                 // ObjectTable: folders first (CommonPrefixes),
                                                 // then object rows with Download/Copy/Delete.
                                                 // Download links use /ui/download/{bucket}/{key} (D-04).
@@ -205,7 +216,7 @@ pub fn ObjectBrowserPage() -> impl IntoView {
                                 }
                                 Err(e) => {
                                     Either::Right(view! {
-                                        <div style="padding:24px;color:var(--destructive);\
+                                        <div style="padding:24px;color:var(--danger);\
                                             font-size:14px;">
                                             {format!("Something went wrong. Refresh the page or \
                                                 check the server logs. ({e})")}
