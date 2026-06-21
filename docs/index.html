@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ferrobucket — self-hosted S3-compatible object storage</title>
+<meta name="description" content="ferrobucket is a lightweight, self-hosted S3-compatible object storage server with a built-in web UI — one static Rust binary that idles around 2 MB of RAM.">
+<meta property="og:title" content="ferrobucket — self-hosted S3-compatible storage">
+<meta property="og:description" content="An S3-compatible object storage server with a built-in web UI, in a single Rust binary. Multipart uploads, presigned URLs, prefix navigation — credentials stay server-side.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%234c97f8'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='1.1' stroke-linejoin='round' stroke-linecap='round'%3E%3Cpath d='M4.3 4Q8 1.3 11.7 4'/%3E%3Cellipse cx='8' cy='4.5' rx='4.9' ry='1.5'/%3E%3Cpath d='M3.3 4.7 4.7 12.3Q8 13.7 11.3 12.3L12.7 4.7'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:'IBM Plex Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased;background:#0a0c0f;color:#e7edf4}
+  ::selection{background:rgba(76,151,248,.28)}
+  a{text-decoration:none}
+  html{scroll-behavior:smooth}
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-thumb{background:#2a323c;border-radius:6px;border:3px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-track{background:transparent}
+  .navlink{color:#97a2af;font-size:14px;font-weight:500;padding:8px 12px;border-radius:7px;transition:color .15s}
+  .navlink:hover{color:#e7edf4}
+  .btn-ghost{transition:border-color .15s,background .15s}
+  .btn-ghost:hover{border-color:#3a4350;background:#181d24}
+  .btn-primary{transition:background .15s}
+  .btn-primary:hover{background:#74b1ff}
+  .pill{transition:border-color .15s}
+  .pill:hover{border-color:#2a323c}
+  .card{transition:border-color .15s,background .15s}
+  .card:hover{border-color:#2a323c;background:#101419}
+  .footlink{color:#646f7c;transition:color .15s}
+  .footlink:hover{color:#97a2af}
+  .iconbtn{transition:border-color .15s,color .15s}
+  .iconbtn:hover{border-color:#3a4350;color:#e7edf4}
+  @media (max-width:780px){
+    .hero-h1{font-size:42px !important}
+    .feat-grid{grid-template-columns:1fr !important}
+    .qs-grid{grid-template-columns:1fr !important;gap:32px !important}
+    .nav-links{display:none !important}
+  }
+</style>
+</head>
+<body>
+<div style="background:#0a0c0f;color:#e7edf4;min-height:100vh;width:100%;overflow-x:hidden;font-size:16px;line-height:1.6;position:relative">
+
+  <!-- glow -->
+  <div style="position:absolute;top:-280px;left:50%;transform:translateX(-50%);width:1100px;max-width:100%;height:760px;background:radial-gradient(ellipse at center,rgba(76,151,248,.16),transparent 62%);pointer-events:none;z-index:0"></div>
+
+  <!-- ===== NAV ===== -->
+  <header style="position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(10,12,15,.72);border-bottom:1px solid #15191f">
+    <nav style="max-width:1140px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:30px;height:30px;border-radius:8px;background:#4c97f8;display:flex;align-items:center;justify-content:center;flex:none">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.3 4Q8 1.3 11.7 4"/><ellipse cx="8" cy="4.5" rx="4.9" ry="1.5"/><path d="M3.3 4.7 4.7 12.3Q8 13.7 11.3 12.3L12.7 4.7"/></svg>
+        </div>
+        <span style="font-weight:700;font-size:17px;letter-spacing:-.3px">ferrobucket</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#646f7c;border:1px solid #1e242c;border-radius:5px;padding:1px 6px">v0.1.0</span>
+      </div>
+      <div class="nav-links" style="margin-left:auto;display:flex;align-items:center;gap:6px">
+        <a href="#features" class="navlink">Features</a>
+        <a href="#install" class="navlink">Install</a>
+        <a href="https://github.com/litvancom/ferrobucket#readme" class="navlink">Docs</a>
+        <a href="https://github.com/litvancom/ferrobucket" class="btn-ghost" style="display:flex;align-items:center;gap:8px;margin-left:6px;padding:7px 13px;border:1px solid #2a323c;border-radius:8px;background:#13171c;color:#e7edf4;font-size:14px;font-weight:600">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 .2a8 8 0 0 0-2.5 15.6c.4.07.55-.17.55-.38l-.01-1.34c-2.2.48-2.67-1.06-2.67-1.06-.36-.92-.88-1.16-.88-1.16-.72-.49.05-.48.05-.48.8.056 1.22.82 1.22.82.71 1.22 1.86.87 2.31.66.07-.51.28-.87.5-1.07-1.75-.2-3.6-.88-3.6-3.9 0-.86.3-1.57.82-2.12-.08-.2-.36-1 .08-2.1 0 0 .67-.21 2.2.81a7.6 7.6 0 0 1 4 0c1.52-1.02 2.19-.81 2.19-.81.44 1.1.16 1.9.08 2.1.51.55.82 1.26.82 2.12 0 3.03-1.85 3.7-3.61 3.89.28.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .2Z"/></svg>
+          <span>Star</span>
+          <img alt="GitHub stars" src="https://img.shields.io/github/stars/litvancom/ferrobucket?style=flat&label=&color=2a323c&labelColor=13171c" style="height:16px;display:block">
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- ===== HERO ===== -->
+  <section style="position:relative;z-index:1;max-width:880px;margin:0 auto;padding:84px 28px 28px;text-align:center">
+    <a href="https://github.com/litvancom/ferrobucket/blob/main/LICENSE" class="pill" style="display:inline-flex;align-items:center;gap:9px;padding:5px 13px 5px 6px;border:1px solid #1e242c;border-radius:20px;background:#0d1014;font-size:13px;color:#97a2af;margin-bottom:30px">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:#4c97f8;background:rgba(76,151,248,.14);border-radius:12px;padding:2px 8px">MIT</span>
+      Open source · self-hosted · zero telemetry
+    </a>
+    <h1 class="hero-h1" style="margin:0;font-size:60px;line-height:1.05;font-weight:700;letter-spacing:-2px;text-wrap:balance">Your own S3,<br>in a single binary</h1>
+    <p style="margin:24px auto 0;max-width:620px;font-size:19px;color:#97a2af;line-height:1.55;text-wrap:pretty">ferrobucket is a lightweight, self-hosted <strong style="color:#e7edf4;font-weight:600">S3-compatible object storage server</strong> with a built-in web UI. Drag-drop multipart uploads, presigned links, prefix navigation — from one static Rust binary that idles around <strong style="color:#e7edf4;font-weight:600">2&nbsp;MB</strong> of RAM, with credentials that never touch the browser.</p>
+
+    <!-- install command (docker) -->
+    <div style="max-width:560px;margin:34px auto 0">
+      <div style="display:flex;align-items:center;gap:10px;padding:13px 14px 13px 17px;border:1px solid #1e242c;border-radius:11px;background:#0d1014;text-align:left">
+        <span style="color:#4c97f8;font-family:'IBM Plex Mono',monospace;font-size:14px;flex:none">$</span>
+        <code id="cmd" style="flex:1;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:#e7edf4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">docker run -p 9000:9000 -v "$PWD/data:/data" ferrobucket --anonymous</code>
+        <button id="copy" onclick="copyCmd()" title="Copy" class="iconbtn" style="flex:none;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:1px solid #2a323c;border-radius:7px;background:#13171c;color:#97a2af;cursor:pointer">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="M3 11V4.4C3 3.6 3.6 3 4.4 3H11" stroke="currentColor" stroke-width="1.3"/></svg>
+        </button>
+      </div>
+      <div style="margin-top:9px;font-size:12.5px;color:#646f7c">Build the image first with <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">docker build -t ferrobucket .</code> — see <a href="#install" style="color:#4c97f8">Install</a>.</div>
+    </div>
+
+    <div style="display:flex;gap:12px;justify-content:center;margin-top:26px;flex-wrap:wrap">
+      <a href="#install" class="btn-primary" style="display:flex;align-items:center;gap:8px;padding:12px 22px;border-radius:9px;background:#4c97f8;color:#fff;font-size:15px;font-weight:600">Get started
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M8.5 4 12.5 8l-4 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <a href="https://github.com/litvancom/ferrobucket" class="btn-ghost" style="display:flex;align-items:center;gap:8px;padding:12px 22px;border-radius:9px;border:1px solid #2a323c;background:#13171c;color:#e7edf4;font-size:15px;font-weight:600">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 .2a8 8 0 0 0-2.5 15.6c.4.07.55-.17.55-.38l-.01-1.34c-2.2.48-2.67-1.06-2.67-1.06-.36-.92-.88-1.16-.88-1.16-.72-.49.05-.48.05-.48.8.056 1.22.82 1.22.82.71 1.22 1.86.87 2.31.66.07-.51.28-.87.5-1.07-1.75-.2-3.6-.88-3.6-3.9 0-.86.3-1.57.82-2.12-.08-.2-.36-1 .08-2.1 0 0 .67-.21 2.2.81a7.6 7.6 0 0 1 4 0c1.52-1.02 2.19-.81 2.19-.81.44 1.1.16 1.9.08 2.1.51.55.82 1.26.82 2.12 0 3.03-1.85 3.7-3.61 3.89.28.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .2Z"/></svg>
+        View source
+      </a>
+    </div>
+
+    <div style="margin-top:40px;font-size:12px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:#4a525c">Speaks S3 with</div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px 22px;justify-content:center;margin-top:16px;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:#646f7c">
+      <span>aws CLI</span><span style="color:#262d35">·</span>
+      <span>boto3</span><span style="color:#262d35">·</span>
+      <span>aws-sdk</span><span style="color:#262d35">·</span>
+      <span>rclone</span><span style="color:#262d35">·</span>
+      <span>s3fs</span><span style="color:#262d35">·</span>
+      <span>s3cmd</span>
+    </div>
+  </section>
+
+  <!-- ===== PRODUCT SHOT ===== -->
+  <section style="position:relative;z-index:1;max-width:1140px;margin:56px auto 0;padding:0 28px">
+    <div style="border-radius:14px;overflow:hidden;border:1px solid #1e242c;box-shadow:0 40px 120px rgba(0,0,0,.6),0 0 0 1px rgba(76,151,248,.05)">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;background:#0d1014;border-bottom:1px solid #15191f">
+        <span style="width:11px;height:11px;border-radius:50%;background:#2a323c"></span>
+        <span style="width:11px;height:11px;border-radius:50%;background:#2a323c"></span>
+        <span style="width:11px;height:11px;border-radius:50%;background:#2a323c"></span>
+        <div style="margin-left:12px;flex:1;max-width:380px;display:flex;align-items:center;gap:8px;padding:5px 12px;border-radius:7px;background:#13171c;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#646f7c">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.4" stroke="#646f7c" stroke-width="1.3"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="#646f7c" stroke-width="1.3"/></svg>
+          127.0.0.1:9000 / ui
+        </div>
+      </div>
+      <img src="screenshot.png" alt="ferrobucket web UI — object browser with sidebar bucket list, folders and files" style="display:block;width:100%;height:auto">
+    </div>
+  </section>
+
+  <!-- ===== FEATURES ===== -->
+  <section id="features" style="position:relative;z-index:1;max-width:1140px;margin:100px auto 0;padding:0 28px">
+    <div style="text-align:center;margin-bottom:48px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#4c97f8;letter-spacing:.5px;margin-bottom:12px">/ FEATURES</div>
+      <h2 style="margin:0;font-size:38px;font-weight:700;letter-spacing:-1px">Everything you reach for,<br>nothing you don't</h2>
+    </div>
+    <div class="feat-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
+
+      <div class="card" style="padding:26px 24px;border:1px solid #1e242c;border-radius:13px;background:#0d1014">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(76,151,248,.12);display:flex;align-items:center;justify-content:center;color:#4c97f8;margin-bottom:16px"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0 1 10.5-4M14 8a6 6 0 0 1-10.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M12.5 1.5v2.6h-2.6M3.5 14.5v-2.6h2.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:7px;letter-spacing:-.2px">S3-compatible API</div>
+        <div style="font-size:14.5px;color:#97a2af;line-height:1.55">Bucket CRUD, object get/put/head/delete, ListObjectsV2 (prefix + delimiter), DeleteObjects and multipart — over the real S3 wire protocol. Path-style addressing for any SigV4 client.</div>
+      </div>
+
+      <div class="card" style="padding:26px 24px;border:1px solid #1e242c;border-radius:13px;background:#0d1014">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(76,151,248,.12);display:flex;align-items:center;justify-content:center;color:#4c97f8;margin-bottom:16px"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M8 11V3M4.8 6.2 8 3l3.2 3.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:7px;letter-spacing:-.2px">Drag-&amp;-drop uploads</div>
+        <div style="font-size:14.5px;color:#97a2af;line-height:1.55">Drop files anywhere in the browser. Large files chunk into a real multipart upload automatically, with live per-part progress.</div>
+      </div>
+
+      <div class="card" style="padding:26px 24px;border:1px solid #1e242c;border-radius:13px;background:#0d1014">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(76,151,248,.12);display:flex;align-items:center;justify-content:center;color:#4c97f8;margin-bottom:16px"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M6.5 9.5 9.5 6.5M7 5l1.3-1.3a2.5 2.5 0 0 1 3.5 3.5L10.5 8.5M9 11l-1.3 1.3a2.5 2.5 0 0 1-3.5-3.5L5.5 7.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:7px;letter-spacing:-.2px">Presigned URLs</div>
+        <div style="font-size:14.5px;color:#97a2af;line-height:1.55">Generate time-boxed GET/PUT share links in one click — from the UI or the CLI. TTL shown, copied to clipboard.</div>
+      </div>
+
+      <div class="card" style="padding:26px 24px;border:1px solid #1e242c;border-radius:13px;background:#0d1014">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(76,151,248,.12);display:flex;align-items:center;justify-content:center;color:#4c97f8;margin-bottom:16px"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M1.5 4.2c0-.6.5-1.1 1.1-1.1h3l1.4 1.6h6.4c.6 0 1.1.5 1.1 1.1v6.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:7px;letter-spacing:-.2px">Built-in web UI</div>
+        <div style="font-size:14.5px;color:#97a2af;line-height:1.55">Browse buckets and objects, preview images &amp; text, navigate prefixes like a filesystem, switch light/dark. No separate frontend to deploy — it's embedded in the binary.</div>
+      </div>
+
+      <div class="card" style="padding:26px 24px;border:1px solid #1e242c;border-radius:13px;background:#0d1014">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(76,151,248,.12);display:flex;align-items:center;justify-content:center;color:#4c97f8;margin-bottom:16px"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l5.5 2.2v3.6c0 3.2-2.3 5.6-5.5 6.7-3.2-1.1-5.5-3.5-5.5-6.7V3.7z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 8l1.5 1.5L10.5 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:7px;letter-spacing:-.2px">Credentials stay server-side</div>
+        <div style="font-size:14.5px;color:#97a2af;line-height:1.55">SigV4 with a single static access/secret key (or <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">--anonymous</code> for local use). Signing happens on the server — keys never reach the browser.</div>
+      </div>
+
+      <div class="card" style="padding:26px 24px;border:1px solid #1e242c;border-radius:13px;background:#0d1014">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(76,151,248,.12);display:flex;align-items:center;justify-content:center;color:#4c97f8;margin-bottom:16px"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2.5 5.5 8 2.5l5.5 3v5L8 13.5 2.5 10.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2.5 5.5 8 8.5l5.5-3M8 8.5v5" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></div>
+        <div style="font-size:17px;font-weight:600;margin-bottom:7px;letter-spacing:-.2px">Tiny &amp; self-contained</div>
+        <div style="font-size:14.5px;color:#97a2af;line-height:1.55">One static binary with embedded WASM/JS/CSS, shipped as a multi-arch <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">scratch</code> Docker image that idles around 2 MB of RAM. No database, no sidecars.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== QUICKSTART ===== -->
+  <section id="install" style="position:relative;z-index:1;max-width:1140px;margin:100px auto 0;padding:0 28px">
+    <div class="qs-grid" style="display:grid;grid-template-columns:1fr 1.1fr;gap:56px;align-items:center">
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#4c97f8;letter-spacing:.5px;margin-bottom:12px">/ QUICKSTART</div>
+        <h2 style="margin:0 0 18px;font-size:34px;font-weight:700;letter-spacing:-.8px">Running in under<br>a minute, with Docker</h2>
+        <div style="display:flex;flex-direction:column;gap:20px">
+          <div style="display:flex;gap:15px">
+            <div style="flex:none;width:28px;height:28px;border-radius:8px;border:1px solid #2a323c;background:#13171c;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#4c97f8">1</div>
+            <div style="padding-top:2px"><div style="font-size:15.5px;font-weight:600;margin-bottom:3px">Build the image</div><div style="font-size:14px;color:#97a2af;line-height:1.5">Clone the repo and <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">docker build</code> — one multi-stage build produces a static binary on a <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">scratch</code> image. (A published image is on the way.)</div></div>
+          </div>
+          <div style="display:flex;gap:15px">
+            <div style="flex:none;width:28px;height:28px;border-radius:8px;border:1px solid #2a323c;background:#13171c;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#4c97f8">2</div>
+            <div style="padding-top:2px"><div style="font-size:15.5px;font-weight:600;margin-bottom:3px">Run the container</div><div style="font-size:14px;color:#97a2af;line-height:1.5">Mount a volume at <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">/data</code> for persistence and expose port 9000. Pass keys via env, or <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">--anonymous</code> for local use.</div></div>
+          </div>
+          <div style="display:flex;gap:15px">
+            <div style="flex:none;width:28px;height:28px;border-radius:8px;border:1px solid #2a323c;background:#13171c;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#4c97f8">3</div>
+            <div style="padding-top:2px"><div style="font-size:15.5px;font-weight:600;margin-bottom:3px">Point your tools at it</div><div style="font-size:14px;color:#97a2af;line-height:1.5">Set <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">--endpoint-url</code> on the aws CLI (or any S3 SDK), and open the web UI at <code style="font-family:'IBM Plex Mono',monospace;color:#97a2af">/ui</code>.</div></div>
+          </div>
+        </div>
+      </div>
+      <div style="border:1px solid #1e242c;border-radius:13px;background:#0d1014;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid #15191f;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#646f7c">
+          <span style="width:8px;height:8px;border-radius:50%;background:#42b95a"></span>
+          docker
+        </div>
+        <pre style="margin:0;padding:20px 22px;font-family:'IBM Plex Mono',monospace;font-size:13px;line-height:1.85;color:#97a2af;overflow-x:auto"><span style="color:#646f7c"># build the image (static binary + embedded UI)</span>
+<span style="color:#4c97f8">$</span> git clone https://github.com/litvancom/ferrobucket
+<span style="color:#4c97f8">$</span> cd ferrobucket
+<span style="color:#4c97f8">$</span> docker build -t ferrobucket .
+
+<span style="color:#646f7c"># run it — objects persist in ./data</span>
+<span style="color:#4c97f8">$</span> docker run -p <span style="color:#74b1ff">9000</span>:<span style="color:#74b1ff">9000</span> -v <span style="color:#42b95a">"$PWD/data:/data"</span> \
+    ferrobucket --anonymous
+<span style="color:#646f7c">#  S3 API + web UI → http://127.0.0.1:9000  (UI at /ui)</span>
+
+<span style="color:#646f7c"># point any S3 client at it (path-style)</span>
+<span style="color:#4c97f8">$</span> aws --endpoint-url <span style="color:#42b95a">http://127.0.0.1:9000</span> s3 ls</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== CTA ===== -->
+  <section style="position:relative;z-index:1;max-width:1140px;margin:100px auto 0;padding:0 28px">
+    <div style="border:1px solid #1e242c;border-radius:18px;background:linear-gradient(180deg,#101419,#0b0e12);padding:60px 32px;text-align:center;overflow:hidden;position:relative">
+      <div style="position:absolute;top:-160px;left:50%;transform:translateX(-50%);width:600px;max-width:100%;height:400px;background:radial-gradient(ellipse at center,rgba(76,151,248,.18),transparent 60%);pointer-events:none"></div>
+      <div style="position:relative">
+        <h2 style="margin:0 0 14px;font-size:36px;font-weight:700;letter-spacing:-1px">Self-host it tonight</h2>
+        <p style="margin:0 auto 28px;max-width:480px;font-size:17px;color:#97a2af">Free forever, MIT licensed. Star the repo, file an issue, send a PR — it's all out in the open.</p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <a href="https://github.com/litvancom/ferrobucket" class="btn-primary" style="display:flex;align-items:center;gap:8px;padding:13px 24px;border-radius:9px;background:#4c97f8;color:#fff;font-size:15px;font-weight:600">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 .2a8 8 0 0 0-2.5 15.6c.4.07.55-.17.55-.38l-.01-1.34c-2.2.48-2.67-1.06-2.67-1.06-.36-.92-.88-1.16-.88-1.16-.72-.49.05-.48.05-.48.8.056 1.22.82 1.22.82.71 1.22 1.86.87 2.31.66.07-.51.28-.87.5-1.07-1.75-.2-3.6-.88-3.6-3.9 0-.86.3-1.57.82-2.12-.08-.2-.36-1 .08-2.1 0 0 .67-.21 2.2.81a7.6 7.6 0 0 1 4 0c1.52-1.02 2.19-.81 2.19-.81.44 1.1.16 1.9.08 2.1.51.55.82 1.26.82 2.12 0 3.03-1.85 3.7-3.61 3.89.28.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .2Z"/></svg>
+            Star on GitHub
+          </a>
+          <a href="https://github.com/litvancom/ferrobucket#readme" class="btn-ghost" style="display:flex;align-items:center;gap:8px;padding:13px 24px;border-radius:9px;border:1px solid #2a323c;background:#13171c;color:#e7edf4;font-size:15px;font-weight:600">Read the docs</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== FOOTER ===== -->
+  <footer style="position:relative;z-index:1;max-width:1140px;margin:80px auto 0;padding:32px 28px 56px;border-top:1px solid #15191f;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:9px">
+      <div style="width:24px;height:24px;border-radius:6px;background:#4c97f8;display:flex;align-items:center;justify-content:center;flex:none">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round"><path d="M4.3 4Q8 1.3 11.7 4"/><ellipse cx="8" cy="4.5" rx="4.9" ry="1.5"/><path d="M3.3 4.7 4.7 12.3Q8 13.7 11.3 12.3L12.7 4.7"/></svg>
+      </div>
+      <span style="font-weight:600;font-size:14px">ferrobucket</span>
+      <span style="font-size:13px;color:#4a525c">· MIT License</span>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:22px;font-size:13.5px;color:#646f7c">
+      <a href="https://github.com/litvancom/ferrobucket#readme" class="footlink">Docs</a>
+      <a href="https://github.com/litvancom/ferrobucket/releases" class="footlink">Releases</a>
+      <a href="https://github.com/litvancom/ferrobucket/issues" class="footlink">Issues</a>
+      <a href="https://github.com/litvancom/ferrobucket" class="footlink">GitHub</a>
+    </div>
+  </footer>
+
+</div>
+<script>
+  function copyCmd(){
+    var cmd = document.getElementById('cmd').textContent;
+    var btn = document.getElementById('copy');
+    var done = function(){ btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M3 8.5 6.5 12 13 4.5" stroke="#42b95a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      setTimeout(function(){ btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="M3 11V4.4C3 3.6 3.6 3 4.4 3H11" stroke="currentColor" stroke-width="1.3"/></svg>'; }, 1600);
+    };
+    if (navigator.clipboard) { navigator.clipboard.writeText(cmd).then(done, done); } else { done(); }
+  }
+</script>
+</body>
+</html>
