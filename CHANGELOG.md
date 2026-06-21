@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation, upload (drag-and-drop + multipart), object detail with metadata and
   presigned URLs, settings, and light/dark themes.
 - Single static release binary with embedded UI assets; multi-arch Docker image
-  (`scratch`, static musl) with a ~2 MB idle memory footprint.
+  (`scratch`, static musl) with a ~6 MB idle memory footprint.
 
 [Unreleased]: https://github.com/litvancom/ferrobucket/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/litvancom/ferrobucket/releases/tag/v0.1.0
