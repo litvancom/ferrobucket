@@ -111,7 +111,25 @@ For any other SDK, the equivalent setting is `force_path_style = true`.
 
 ## Docker
 
-### Single-arch (current host platform)
+### Pull from GHCR (recommended)
+
+A multi-arch image (`linux/amd64` + `linux/arm64`) is published to the GitHub
+Container Registry:
+
+```bash
+docker run -p 9000:9000 -v ./data:/data \
+  ghcr.io/litvancom/ferrobucket --anonymous
+
+# or with a static credential
+docker run -p 9000:9000 -v ./data:/data \
+  -e FERROBUCKET_ACCESS_KEY=myaccesskey \
+  -e FERROBUCKET_SECRET_KEY=mysecretkey \
+  ghcr.io/litvancom/ferrobucket
+```
+
+S3 API + web UI are then on `http://127.0.0.1:9000` (UI at `/ui`).
+
+### Build it yourself (single-arch)
 
 ```bash
 docker build -t ferrobucket:latest .
